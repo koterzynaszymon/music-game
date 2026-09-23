@@ -15,3 +15,8 @@ export async function createRoom(id: string, nickname: string) {
 
   return data;
 }
+
+export async function checkIfRoomExists(code: string) {
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/rooms/${code}`);
+  return response.ok;
+}

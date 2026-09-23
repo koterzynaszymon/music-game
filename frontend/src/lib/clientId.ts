@@ -7,3 +7,11 @@ export function getOrCreateClientId() {
   localStorage.setItem("music-game-client-id", newId);
   return newId;
 }
+
+export function saveClientNicknameToStorage(nickname: string) {
+  localStorage.setItem("music-game-client-nickname", nickname);
+}
+
+export function getClientNicknameFromStorage() {
+  return localStorage.getItem("music-game-client-nickname");
+}
