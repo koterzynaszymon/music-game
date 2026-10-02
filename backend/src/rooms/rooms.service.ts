@@ -69,4 +69,13 @@ export class RoomsService {
     }
     return room;
   }
+  changePlayerReadyStatus(code: string, id: string): Room {
+    const room = this.findRoomByCode(code);
+    const player = room.players.get(id);
+    if(!player) {
+      throw new NotFoundException('Player not found');
+    }
+    player.isReady = !player.isReady;
+    return room;
+  }
 }

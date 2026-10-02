@@ -8,6 +8,7 @@ import {
 } from '@nestjs/websockets';
 import { JoinRoomDto } from './dto/join-room.dto.js';
 import { toPublicRoom } from './room.model.js';
+import { ChangePlayerReadyStatusDto } from './dto/change-player-ready-status.dto.js';
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
   @WebSocketServer() server: Server;
@@ -43,4 +44,18 @@ export class RoomsGateway {
       return;
     }
   }
-}
+
+  @SubscribeMessage('changePlayerReadyStatus')
+  handleChangePlayerReadyStatus(@MessageBody() dto: ChangePlayerReadyStatusDto
+, @ConnectedSocket() client: Socket) {
+  const { code, id } = dto;
+  try {
+    const room = this.roomsService.changePlayerReadyStatus(code, id);
+    this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+  } catch (error) {
+    client.emit('error', {
+      message: (error as Error).message,
+    });
+    return;
+  }
+}}

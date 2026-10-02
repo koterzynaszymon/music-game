@@ -42,4 +42,19 @@ describe('RoomsService', () => {
         expect(result.room.players.size).toBe(1);
         expect(result.room.players.get("1234567890")?.nickname).toBe("test");
     })
+    it("should set a player as ready", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        service.changePlayerReadyStatus(room.code, "1234567891");
+        expect(result.room.players.get("1234567891")?.isReady).toBe(true);
+    })
+    it("should set a player as not ready", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        service.changePlayerReadyStatus(room.code, "1234567891");
+        service.changePlayerReadyStatus(room.code, "1234567891");
+        expect(result.room.players.get("1234567891")?.isReady).toBe(false);
+    })
 });
