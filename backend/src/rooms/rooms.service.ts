@@ -1,7 +1,9 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { Player, Room } from './room.model.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
@@ -76,6 +78,24 @@ export class RoomsService {
       throw new NotFoundException('Player not found');
     }
     player.isReady = !player.isReady;
+    return room;
+  }
+  kickPlayer(code: string, requesterId: string, targetId: string): Room {
+    const room = this.findRoomByCode(code);
+    if(room.owner !== requesterId) {
+      throw new ForbiddenException('You are not the owner of the room');
+    }
+    if(room.owner === targetId) {
+      throw new BadRequestException('You cannot kick yourself as an admin');
+    }
+    if(requesterId === targetId) {
+      throw new BadRequestException('You cannot kick yourself as a player');
+    }
+    if(!room.players.has(targetId)) {
+      throw new NotFoundException('Player not found');
+    }
+    room.players.delete(targetId);
+
     return room;
   }
 }

@@ -1,16 +1,24 @@
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { Socket } from "socket.io-client";
 import io from "socket.io-client";
 import { getOrCreateClientId } from "../lib/clientId.ts";
 import { getClientNicknameFromStorage } from "../lib/clientId.ts";
 
-function ShowUserReadyButton({ code, player, socket }: { code: string, player: any, socket: Socket }) {
+function ShowUserReadyButton({
+  code,
+  player,
+  socket,
+}: {
+  code: string;
+  player: any;
+  socket: Socket;
+}) {
   function handleChangePlayerReadyStatus() {
     socket.emit("changePlayerReadyStatus", {
       code: code,
       id: player.id,
-    })
+    });
   }
   return (
     <button
@@ -26,7 +34,7 @@ export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [room, setRoom] = useState<any | null>(null);
-
+  const navigate = useNavigate();
   function estabilishConnection() {
     const newSocket = io(import.meta.env.VITE_API_URL, {
       reconnection: true,
@@ -41,7 +49,9 @@ export default function RoomPage() {
     newSocket.on("error", (error: any) => {
       console.error(error);
     });
-
+    newSocket.on("kicked", () => {
+      navigate("/");
+    })
     newSocket.emit("joinRoom", {
       code: code,
       id: getOrCreateClientId(),
@@ -62,6 +72,14 @@ export default function RoomPage() {
     };
   }, [code]);
 
+  function handleKickPlayer(targetId: string) {
+    socket?.emit("kickPlayer", {
+      code: code,
+      requesterId: getOrCreateClientId(),
+      targetId: targetId,
+    })
+  }
+
   return (
     <section className="flex flex-col items-center h-screen">
       <h1 className="text-4xl font-bold ">Room</h1>
@@ -72,7 +90,16 @@ export default function RoomPage() {
           return (
             <li key={player.id} className="flex items-center gap-2">
               {player.nickname} - {player.isReady ? "Ready" : "Not Ready"}
-              {player.id === userId ? <ShowUserReadyButton code={code} player={player} socket={socket} /> : null}
+              {player.id === userId ? (
+                <ShowUserReadyButton
+                  code={code}
+                  player={player}
+                  socket={socket}
+                />
+              ) : null}
+              {player.id !== room?.owner ? (
+                <p className="text-red-500 hover:cursor-pointer" onClick={() => handleKickPlayer(player.id)}>Kick</p>
+              ) : null}
             </li>
           );
         })}

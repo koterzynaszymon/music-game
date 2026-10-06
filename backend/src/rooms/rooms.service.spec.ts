@@ -1,4 +1,4 @@
-import { ConflictException } from "@nestjs/common";
+import { BadRequestException, ConflictException, NotFoundException } from "@nestjs/common";
 import { RoomsService } from "./rooms.service.js";
 
 describe('RoomsService', () => {
@@ -56,5 +56,25 @@ describe('RoomsService', () => {
         service.changePlayerReadyStatus(room.code, "1234567891");
         service.changePlayerReadyStatus(room.code, "1234567891");
         expect(result.room.players.get("1234567891")?.isReady).toBe(false);
+    })
+    it("should kick a player from a room", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        service.kickPlayer(room.code, "1234567890", "1234567891");
+        expect(result.room.players.size).toBe(1);
+        expect(result.room.players.get("1234567891")?.nickname).toBe(undefined);
+    })
+    it("player cannot kick himself", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        expect(() => service.kickPlayer(room.code, "1234567890", "1234567890")).toThrow(BadRequestException);
+    })
+    it("error should appear if player tries to kick a non-existent player", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        expect(() => service.kickPlayer(room.code, "1234567890", "1234567892")).toThrow(NotFoundException);
     })
 });

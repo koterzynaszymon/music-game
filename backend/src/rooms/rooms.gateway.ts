@@ -9,6 +9,7 @@ import {
 import { JoinRoomDto } from './dto/join-room.dto.js';
 import { toPublicRoom } from './room.model.js';
 import { ChangePlayerReadyStatusDto } from './dto/change-player-ready-status.dto.js';
+import { KickPlayerDto } from './dto/kick-player.dto.js';
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
   @WebSocketServer() server: Server;
@@ -28,6 +29,7 @@ export class RoomsGateway {
       );
 
       client.join(room.code);
+      client.join(id);
       if(isNewPlayer) {
         this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
       }
@@ -58,4 +60,20 @@ export class RoomsGateway {
     });
     return;
   }
-}}
+}
+
+  @SubscribeMessage("kickPlayer")
+  handleKickPlayer(@MessageBody() dto: KickPlayerDto, @ConnectedSocket() client: Socket){
+    const { code, requesterId, targetId } = dto;
+    try {
+      const room = this.roomsService.kickPlayer(code, requesterId, targetId);
+      this.server.to(targetId).emit('kicked');
+      this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+    } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
+  }
+}
