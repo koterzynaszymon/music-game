@@ -1,20 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
+  --text: #9ca3af;
+  --text-h: #f3f4f6;
+  --bg: #16171d;
+  --bg-pattern: #1c1e26;
+  --border: #2e303a;
+  --code-bg: #1f2028;
+  --accent: #c084fc;
+  --accent-bg: rgba(192, 132, 252, 0.15);
+  --accent-border: rgba(192, 132, 252, 0.5);
+  --social-bg: rgba(47, 48, 58, 0.5);
   --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+    rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --sans: "Fredoka Variable", system-ui, "Segoe UI", Roboto, sans-serif;
+  --heading: "Fredoka Variable", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
   font: 18px/145% var(--sans);
@@ -63,6 +64,17 @@
   box-sizing: border-box;
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--bg-pattern);
+  mask-image: url("/notes/pattern.svg");
+  mask-size: 240px;
+  mask-repeat: repeat;
+}
 body {
   margin: 0;
 }
@@ -102,6 +114,91 @@ code,
   display: inline-flex;
   border-radius: 4px;
   color: var(--text-h);
+}
+
+
+@property --btn-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes btn-border-spin {
+  to {
+    --btn-angle: 360deg;
+  }
+}
+
+/* In the "components" layer so Tailwind utilities (layer "utilities")
+   can override it, e.g. className="btn-primary [--btn-face:...]" */
+@layer components {
+.btn-primary {
+  --btn-face: #c084fc;
+  --btn-face-hover: #cf9dfd;
+  --btn-edge: #7e3fc2;
+  --btn-text: #1e0b36;
+  --btn-depth: 4px;
+  --btn-glint: #ffffff;
+  --btn-fill: var(--btn-face);
+
+  font: inherit;
+  font-weight: 600;
+  color: var(--btn-text);
+  border: 3px solid transparent;
+  border-radius: 12px;
+  padding: 10px 22px;
+  cursor: pointer;
+
+  background:
+    linear-gradient(var(--btn-fill), var(--btn-fill)) padding-box,
+    conic-gradient(
+        from var(--btn-angle),
+        var(--btn-fill) 0deg 280deg,
+        var(--btn-glint) 320deg,
+        var(--btn-fill) 360deg
+      )
+      border-box;
+  animation: btn-border-spin 2.5s linear infinite;
+
+  box-shadow: 0 var(--btn-depth) 0 var(--btn-edge);
+  transition:
+    transform 80ms ease-out,
+    box-shadow 80ms ease-out;
+}
+
+.btn-primary:hover {
+  --btn-fill: var(--btn-face-hover);
+}
+
+
+.btn-primary:active {
+  transform: translateY(var(--btn-depth));
+  box-shadow: 0 0 0 var(--btn-edge);
+}
+
+.btn-primary:focus-visible {
+  outline: 3px solid var(--text-h);
+  outline-offset: 4px;
+}
+
+.btn-primary:disabled {
+  --btn-fill: var(--border);
+  color: var(--text);
+  animation: none;
+  box-shadow: none;
+  transform: none;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary {
+    animation: none;
+    transition: none;
+  }
+  .btn-primary:active {
+    transform: none;
+  }
+}
 }
 
 code {

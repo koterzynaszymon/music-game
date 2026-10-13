@@ -71,7 +71,7 @@ export default function Homepage() {
           value={nickname}
         />
         <button
-          className="bg-blue-500 text-white rounded-md p-2 hover:cursor-pointer hover:bg-blue-600 transition-all duration-300"
+          className="btn-primary"
           onClick={handleCreateRoom}
         >
           Create Room
@@ -85,7 +85,7 @@ export default function Homepage() {
           value={roomCode}
         />
         <button
-          className="bg-blue-500 text-white rounded-md p-2 hover:cursor-pointer hover:bg-blue-600 transition-all duration-300"
+          className="btn-primary [--btn-face:var(--color-blue-400)] [--btn-face-hover:var(--color-blue-300)] [--btn-edge:var(--color-blue-700)] [--btn-text:var(--color-blue-950)]"
           onClick={handleJoinRoom}
         >
           Join Room

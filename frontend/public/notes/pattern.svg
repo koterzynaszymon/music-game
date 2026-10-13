@@ -1,0 +1,47 @@
+<!--
+  Background tile: 240x240, repeated edge to edge by CSS.
+  Icons are Lucide (ISC license), drawn on a 24x24 grid and placed with transform.
+  stroke-width on each group = 2 / scale, so every note ends up with the same 2px line.
+  Keep icons away from the tile edges - anything crossing an edge gets cut off at the seam.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240"
+     fill="none" stroke="black" stroke-linecap="round" stroke-linejoin="round">
+
+  <!-- music: beamed pair, top left -->
+  <g transform="translate(18 24) rotate(-12) scale(1.5)" stroke-width="1.33">
+    <path d="M9 18V5l12-2v13"/>
+    <circle cx="6" cy="18" r="3"/>
+    <circle cx="18" cy="16" r="3"/>
+  </g>
+
+  <!-- music-3: quarter note, top right -->
+  <g transform="translate(142 16) rotate(14) scale(1.1)" stroke-width="1.82">
+    <circle cx="12" cy="18" r="4"/>
+    <path d="M16 18V2"/>
+  </g>
+
+  <!-- clef-treble: the accent, used once, middle -->
+  <g transform="translate(94 92) rotate(-8) scale(1.7)" stroke-width="1.18">
+    <path d="M10.586 21.414a2 2 0 0 0 3.378-1.791L11.036 4.377a2 2 0 1 1 3.378 1.037C12.414 7.414 7 8 7 13a5 5 0 0 0 5 5 5 4 0 0 0 5-4 3 3 0 0 0-3-3 3 2 0 0 0-3 2"/>
+  </g>
+
+  <!-- music-2: eighth note, right -->
+  <g transform="translate(184 128) rotate(18) scale(1.25)" stroke-width="1.6">
+    <circle cx="8" cy="18" r="4"/>
+    <path d="M12 18V2l7 4"/>
+  </g>
+
+  <!-- music-4: beamed pair with double beam, bottom left -->
+  <g transform="translate(30 150) rotate(10) scale(1.3)" stroke-width="1.54">
+    <path d="M9 18V5l12-2v13"/>
+    <path d="m9 9 12-2"/>
+    <circle cx="6" cy="18" r="3"/>
+    <circle cx="18" cy="16" r="3"/>
+  </g>
+
+  <!-- music-3 again, smaller and tilted the other way, bottom right -->
+  <g transform="translate(148 196) rotate(-18) scale(0.9)" stroke-width="2.22">
+    <circle cx="12" cy="18" r="4"/>
+    <path d="M16 18V2"/>
+  </g>
+</svg>
