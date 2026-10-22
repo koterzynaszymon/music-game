@@ -77,4 +77,29 @@ describe('RoomsService', () => {
         const result = service.joinRoom(room.code, "1234567891", "test2");
         expect(() => service.kickPlayer(room.code, "1234567890", "1234567892")).toThrow(NotFoundException);
     })
+    it("player leaves a room", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        service.leaveRoom(room.code, "1234567891");
+        expect(result.room.players.size).toBe(1);
+        expect(result.room.players.get("1234567891")?.nickname).toBe(undefined);
+    })
+    it("error should appear if player tries to leave a non-existent room", () => {
+        const service = new RoomsService();
+        expect(() => service.leaveRoom("1234567890", "1234567891")).toThrow(NotFoundException);
+    })
+    it("error should appear if player tries to leave a room he is not in", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        expect(() => service.leaveRoom(room.code, "1234567892")).toThrow(NotFoundException);
+    })
+    it("when admin leaves a room, the room is deleted", () => {
+        const service = new RoomsService();
+        const room = service.createRoom({ id: "1234567890", nickname: "test" });
+        const result = service.joinRoom(room.code, "1234567891", "test2");
+        service.closeRoom(room.code, "1234567890");
+        expect(service.findRoom(room.code)).toBeUndefined();
+    })
 });

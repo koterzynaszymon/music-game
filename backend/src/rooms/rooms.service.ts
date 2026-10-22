@@ -98,4 +98,20 @@ export class RoomsService {
 
     return room;
   }
+  leaveRoom(code: string, id: string) : Room {
+    const room = this.findRoomByCode(code);
+    if(!room.players.has(id)) {
+      throw new NotFoundException('Player not found');
+    }
+    room.players.delete(id);
+    return room;
+  }
+  closeRoom(code: string, id: string) : Room {
+    const room = this.findRoomByCode(code);
+    if(room.owner !== id) {
+      throw new ForbiddenException('You are not the owner of the room');
+    }
+    this.rooms.delete(code);
+    return room;
+  }
 }

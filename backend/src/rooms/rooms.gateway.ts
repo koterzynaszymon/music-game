@@ -10,6 +10,8 @@ import { JoinRoomDto } from './dto/join-room.dto.js';
 import { toPublicRoom } from './room.model.js';
 import { ChangePlayerReadyStatusDto } from './dto/change-player-ready-status.dto.js';
 import { KickPlayerDto } from './dto/kick-player.dto.js';
+import { LeaveRoomDto } from './dto/leave-room.dto.js';
+import { CloseRoomDto } from './dto/close-room.dto.js';
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
   @WebSocketServer() server: Server;
@@ -30,7 +32,7 @@ export class RoomsGateway {
 
       client.join(room.code);
       client.join(id);
-      if(isNewPlayer) {
+      if (isNewPlayer) {
         this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
       }
 
@@ -38,7 +40,6 @@ export class RoomsGateway {
         room: toPublicRoom(room),
         isNewPlayer: isNewPlayer,
       });
-
     } catch (error) {
       client.emit('error', {
         message: (error as Error).message,
@@ -48,27 +49,70 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('changePlayerReadyStatus')
-  handleChangePlayerReadyStatus(@MessageBody() dto: ChangePlayerReadyStatusDto
-, @ConnectedSocket() client: Socket) {
-  const { code, id } = dto;
-  try {
-    const room = this.roomsService.changePlayerReadyStatus(code, id);
-    this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
-  } catch (error) {
-    client.emit('error', {
-      message: (error as Error).message,
-    });
-    return;
+  handleChangePlayerReadyStatus(
+    @MessageBody() dto: ChangePlayerReadyStatusDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const { code, id } = dto;
+    try {
+      const room = this.roomsService.changePlayerReadyStatus(code, id);
+      this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+    } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
   }
-}
 
-  @SubscribeMessage("kickPlayer")
-  handleKickPlayer(@MessageBody() dto: KickPlayerDto, @ConnectedSocket() client: Socket){
+  @SubscribeMessage('kickPlayer')
+  handleKickPlayer(
+    @MessageBody() dto: KickPlayerDto,
+    @ConnectedSocket() client: Socket,
+  ) {
     const { code, requesterId, targetId } = dto;
     try {
       const room = this.roomsService.kickPlayer(code, requesterId, targetId);
       this.server.to(targetId).emit('kicked');
       this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+    } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
+  }
+
+  @SubscribeMessage('leaveRoom')
+  handleLeaveRoom(
+    @MessageBody() dto: LeaveRoomDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const {code, id} = dto;
+    try{
+      const room = this.roomsService.leaveRoom(code, id);
+      this.server.to(id).emit('leftRoom');
+      this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+      client.leave(room.code);
+      client.leave(id);
+    } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
+  }
+  
+  @SubscribeMessage('closeRoom')
+  handleCloseRoom(
+    @MessageBody() dto: CloseRoomDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const {code, id} = dto;
+    try {
+      const room = this.roomsService.closeRoom(code, id);
+      client.to(room.code).emit('roomClosed');
+      this.server.in(room.code).socketsLeave(room.code);
     } catch (error) {
       client.emit('error', {
         message: (error as Error).message,
