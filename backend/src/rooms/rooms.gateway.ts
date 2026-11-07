@@ -12,6 +12,7 @@ import { ChangePlayerReadyStatusDto } from './dto/change-player-ready-status.dto
 import { KickPlayerDto } from './dto/kick-player.dto.js';
 import { LeaveRoomDto } from './dto/leave-room.dto.js';
 import { CloseRoomDto } from './dto/close-room.dto.js';
+import { SetSongsPerPlayerDto } from './dto/set-songs-per-player.dto.js';
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
   @WebSocketServer() server: Server;
@@ -41,7 +42,8 @@ export class RoomsGateway {
         isNewPlayer: isNewPlayer,
       });
     } catch (error) {
-      client.emit('error', {
+      // Dedicated event: the client is not in the room, so it should leave the room page instead of staying on an empty one
+      client.emit('joinRejected', {
         message: (error as Error).message,
       });
       return;
@@ -113,6 +115,27 @@ export class RoomsGateway {
       const room = this.roomsService.closeRoom(code, id);
       client.to(room.code).emit('roomClosed');
       this.server.in(room.code).socketsLeave(room.code);
+    } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
+  }
+
+  @SubscribeMessage('setSongsPerPlayer')
+  handleSetSongsPerPlayer(
+    @MessageBody() dto: SetSongsPerPlayerDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const { code, requesterId, songsPerPlayer } = dto;
+    try {
+      const room = this.roomsService.setSongsPerPlayer(
+        code,
+        requesterId,
+        songsPerPlayer,
+      );
+      this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
     } catch (error) {
       client.emit('error', {
         message: (error as Error).message,

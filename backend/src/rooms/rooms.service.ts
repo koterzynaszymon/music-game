@@ -5,7 +5,12 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { Player, Room } from './room.model.js';
+import {
+  MAX_SONGS_PER_PLAYER,
+  MIN_SONGS_PER_PLAYER,
+  Player,
+  Room,
+} from './room.model.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
 
 @Injectable()
@@ -28,7 +33,7 @@ export class RoomsService {
       code: roomCode,
       owner: dto.id,
       players: new Map<string, Player>(),
-      status: 'waiting',
+      status: 'configuring',
       songsPerPlayer: 2,
     };
     room.players.set(dto.id, player);
@@ -46,8 +51,13 @@ export class RoomsService {
     nickname: string,
   ): { room: Room; isNewPlayer: boolean } {
     const room = this.findRoomByCode(code);
+    // Reattach must work in every phase (refresh mid-game), so it is checked
+    // before the phase rule below, which only applies to brand new players.
     if (room.players.has(id)) {
       return { room, isNewPlayer: false };
+    }
+    if (room.status !== 'configuring') {
+      throw new ForbiddenException('This room is no longer accepting new players');
     }
     for (const player of room.players.values()) {
       if (player.nickname === nickname) {
@@ -76,6 +86,9 @@ export class RoomsService {
     const player = room.players.get(id);
     if(!player) {
       throw new NotFoundException('Player not found');
+    }
+    if(room.status !== 'submitting') {
+      throw new BadRequestException('You can only be ready while songs are being submitted');
     }
     player.isReady = !player.isReady;
     return room;
@@ -112,6 +125,28 @@ export class RoomsService {
       throw new ForbiddenException('You are not the owner of the room');
     }
     this.rooms.delete(code);
+    return room;
+  }
+  setSongsPerPlayer(code: string, requesterId: string, songsPerPlayer: number): Room {
+    const room = this.findRoomByCode(code);
+    if(room.owner !== requesterId) {
+      throw new ForbiddenException('You are not the owner of the room');
+    }
+    if(room.status !== 'configuring') {
+      throw new BadRequestException('Songs per player has already been submitted');
+    }
+    if(
+      !Number.isInteger(songsPerPlayer) ||
+      songsPerPlayer < MIN_SONGS_PER_PLAYER ||
+      songsPerPlayer > MAX_SONGS_PER_PLAYER
+    ) {
+      throw new BadRequestException(
+        `Songs per player must be a whole number from ${MIN_SONGS_PER_PLAYER} to ${MAX_SONGS_PER_PLAYER}`,
+      );
+    }
+    // All checks passed, so both changes happen together (never one without the other)
+    room.songsPerPlayer = songsPerPlayer;
+    room.status = 'submitting';
     return room;
   }
 }

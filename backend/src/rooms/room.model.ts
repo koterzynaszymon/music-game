@@ -1,3 +1,13 @@
+export const MIN_SONGS_PER_PLAYER = 1;
+export const MAX_SONGS_PER_PLAYER = 5;
+
+// Room lifecycle:
+//   configuring -> host picks songs per player, new players may join
+//   submitting  -> players add their songs and press ready, no new players
+//   playing     -> the round is running
+//   finished    -> leaderboard
+export type RoomStatus = "configuring" | "submitting" | "playing" | "finished";
+
 export interface Song {
     youtubeId: string;
     startTimestamp: number;
@@ -16,7 +26,7 @@ export interface Room {
     code: string;
     owner: string;
     players: Map<string, Player>;
-    status: "waiting" | "playing" | "finished";
+    status: RoomStatus;
     songsPerPlayer: number;
 }
 
@@ -24,7 +34,7 @@ export interface PublicRoom {
     code: string;
     owner: string;
     players: Record<string, Player>;
-    status: "waiting" | "playing" | "finished";
+    status: RoomStatus;
     songsPerPlayer: number;
 }
 
