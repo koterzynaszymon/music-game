@@ -4,54 +4,53 @@ import { Socket } from "socket.io-client";
 import io from "socket.io-client";
 import { getOrCreateClientId } from "../lib/clientId.ts";
 import { getClientNicknameFromStorage } from "../lib/clientId.ts";
-
-function ShowUserReadyButton({
-  code,
-  player,
-  socket,
-}: {
-  code: string;
-  player: any;
-  socket: Socket;
-}) {
-  function handleChangePlayerReadyStatus() {
-    socket.emit("changePlayerReadyStatus", {
-      code: code,
-      id: player.id,
-    });
-  }
-  return (
-    <button
-      className={`${player.isReady ? "bg-green-500" : "bg-red-500"} text-white p-2 rounded-md text-sm hover:bg-${player.isReady ? "green-600" : "red-600"} hover:cursor-pointer`}
-      onClick={() => handleChangePlayerReadyStatus()}
-    >
-      {player.isReady ? "Ready" : "Not Ready"}
-    </button>
-  );
-}
+import type { Notice } from "../components/NoticeDialog.tsx";
+import type { Room } from "../types/room.ts";
+import CopyCodeButton from "../components/room/CopyCodeButton.tsx";
+import PlayerList from "../components/room/PlayerList.tsx";
+import ReadyToggleButton from "../components/room/ReadyToggleButton.tsx";
+import SongsPerPlayerSetting from "../components/room/SongsPerPlayerSetting.tsx";
 
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [room, setRoom] = useState<any | null>(null);
+  const [room, setRoom] = useState<Room | null>(null);
   const navigate = useNavigate();
   function estabilishConnection() {
     const newSocket = io(import.meta.env.VITE_API_URL, {
       reconnection: true,
     });
-    newSocket.on("roomJoined", (data: any) => {
+    newSocket.on("roomJoined", (data: { room: Room }) => {
       setRoom(data.room);
     });
-    newSocket.on("roomUpdated", (updatedRoom) => {
+    newSocket.on("roomUpdated", (updatedRoom: Room) => {
       console.log("roomUpdated", updatedRoom);
       setRoom(updatedRoom);
     });
-    newSocket.on("error", (error: any) => {
+    newSocket.on("error", (error: { message: string }) => {
       console.error(error);
     });
+    newSocket.on("joinRejected", (error: { message: string }) => {
+      const notice: Notice = {
+        title: "Couldn't join the room",
+        message: error.message,
+      };
+      navigate("/", { state: { notice } });
+    });
     newSocket.on("kicked", () => {
-      navigate("/");
-    })
+      const notice: Notice = {
+        title: "Removed from room",
+        message: "The host removed you from the room. Join another room with a new code.",
+      };
+      navigate("/", { state: { notice } });
+    });
+    newSocket.on("roomClosed", () => {
+      const notice: Notice = {
+        title: "Room closed",
+        message: "The host closed the room. Create a new one or join with another code.",
+      };
+      navigate("/", { state: { notice } });
+    });
     newSocket.emit("joinRoom", {
       code: code,
       id: getOrCreateClientId(),
@@ -61,7 +60,6 @@ export default function RoomPage() {
     setSocket(newSocket);
     return newSocket;
   }
-  const userId = getOrCreateClientId();
 
   useEffect(() => {
     const newSocket = estabilishConnection();
@@ -72,38 +70,89 @@ export default function RoomPage() {
     };
   }, [code]);
 
+  const userId = getOrCreateClientId();
+  const me = room?.players[userId];
+  const isHost = room?.owner === userId;
+
   function handleKickPlayer(targetId: string) {
     socket?.emit("kickPlayer", {
       code: code,
-      requesterId: getOrCreateClientId(),
+      requesterId: userId,
       targetId: targetId,
-    })
+    });
+  }
+
+  function handleLeaveRoom() {
+    // The host can't just leave: leaving as host closes the room for everyone
+    socket?.emit(isHost ? "closeRoom" : "leaveRoom", {
+      code: code,
+      id: userId,
+    });
+    navigate("/");
+  }
+
+  function handleToggleReady() {
+    socket?.emit("changePlayerReadyStatus", {
+      code: code,
+      id: userId,
+    });
+  }
+
+  function handleSubmitSongsPerPlayer(songsPerPlayer: number) {
+    // server broadcasts roomUpdated to everyone (us included)
+    socket?.emit("setSongsPerPlayer", {
+      code: code,
+      requesterId: userId,
+      songsPerPlayer: songsPerPlayer,
+    });
   }
 
   return (
-    <section className="flex flex-col items-center h-screen">
-      <h1 className="text-4xl font-bold ">Room</h1>
-      <p>Room Code: {code}</p>
-      <p className="text-white">Room song limit: {room?.songsPerPlayer}</p>
-      <ul>
-        {Object.values(room?.players || {}).map((player: any) => {
-          return (
-            <li key={player.id} className="flex items-center gap-2">
-              {player.nickname} - {player.isReady ? "Ready" : "Not Ready"}
-              {player.id === userId ? (
-                <ShowUserReadyButton
-                  code={code}
-                  player={player}
-                  socket={socket}
+    <section className="flex flex-col w-full min-h-screen px-4 py-6 text-left">
+      <header className="flex items-center justify-between gap-4 mb-8">
+        <button
+          onClick={handleLeaveRoom}
+          className="rounded-lg px-3 py-1.5 -ml-3 hover:bg-(--social-bg) hover:text-(--text-h) cursor-pointer focus-visible:outline-2 focus-visible:outline-(--text-h)"
+        >
+          {isHost ? "← Close room" : "← Leave room"}
+        </button>
+        {code && <CopyCodeButton code={code} />}
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-[20rem_1fr] gap-8 items-start">
+        <aside>
+          {room && (
+            <PlayerList room={room} userId={userId} onKick={handleKickPlayer} />
+          )}
+
+          {room?.status === "configuring" && (
+            <div className="mt-4">
+              {isHost ? (
+                <SongsPerPlayerSetting
+                  initialValue={room.songsPerPlayer}
+                  onSubmit={handleSubmitSongsPerPlayer}
                 />
-              ) : null}
-              {player.id !== room?.owner ? (
-                <p className="text-red-500 hover:cursor-pointer" onClick={() => handleKickPlayer(player.id)}>Kick</p>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+              ) : (
+                <p className="text-sm">The host is choosing how many songs each player adds.</p>
+              )}
+            </div>
+          )}
+
+          <div className="mt-4">
+            {me && room?.status === "submitting" && (
+              <ReadyToggleButton
+                isReady={me.isReady}
+                onToggle={handleToggleReady}
+              />
+            )}
+          </div>
+        </aside>
+
+        {/* Game area: the player/guess UI will live here once the round starts */}
+        <main className="flex items-center justify-center min-h-64 rounded-2xl border-2 border-dashed border-(--border) p-8 text-center">
+          <p>The game starts when everyone is ready.</p>
+        </main>
+      </div>
     </section>
   );
 }
