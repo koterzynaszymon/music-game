@@ -13,6 +13,9 @@ import { KickPlayerDto } from './dto/kick-player.dto.js';
 import { LeaveRoomDto } from './dto/leave-room.dto.js';
 import { CloseRoomDto } from './dto/close-room.dto.js';
 import { SetSongsPerPlayerDto } from './dto/set-songs-per-player.dto.js';
+import { SubmitSongDto } from './dto/submit-song.dto.js';
+
+
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
   @WebSocketServer() server: Server;
@@ -136,6 +139,25 @@ export class RoomsGateway {
         songsPerPlayer,
       );
       this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+    } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
+  }
+  @SubscribeMessage('submitSong')
+  handleSubmitSong(
+    @MessageBody() dto: SubmitSongDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const { code, id, song } = dto;
+    try {
+      const room = this.roomsService.submitSong(code, id, song);
+      this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+      client.emit('songSubmitted', {
+        song: song,
+      });
     } catch (error) {
       client.emit('error', {
         message: (error as Error).message,
