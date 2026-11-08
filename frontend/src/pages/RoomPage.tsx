@@ -10,6 +10,8 @@ import CopyCodeButton from "../components/room/CopyCodeButton.tsx";
 import PlayerList from "../components/room/PlayerList.tsx";
 import ReadyToggleButton from "../components/room/ReadyToggleButton.tsx";
 import SongsPerPlayerSetting from "../components/room/SongsPerPlayerSetting.tsx";
+import SongSubmissionPanel from "../components/room/SongSubmissionPanel.tsx";
+import type { NewSong } from "../components/room/SongPicker.tsx";
 
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
@@ -107,6 +109,14 @@ export default function RoomPage() {
     });
   }
 
+  function handleSubmitSong(song: NewSong) {
+    socket?.emit("submitSong", {
+      code: code,
+      id: userId,
+      song: song,
+    });
+  }
+
   return (
     <section className="flex flex-col w-full min-h-screen px-4 py-6 text-left">
       <header className="flex items-center justify-between gap-4 mb-8">
@@ -148,10 +158,20 @@ export default function RoomPage() {
           </div>
         </aside>
 
-        {/* Game area: the player/guess UI will live here once the round starts */}
-        <main className="flex items-center justify-center min-h-64 rounded-2xl border-2 border-dashed border-(--border) p-8 text-center">
-          <p>The game starts when everyone is ready.</p>
-        </main>
+        {/* Game area: song submission now, the player/guess UI once the round starts */}
+        {me && room?.status === "submitting" ? (
+          <main>
+            <SongSubmissionPanel
+              songs={me.songs}
+              songsPerPlayer={room.songsPerPlayer}
+              onSubmitSong={handleSubmitSong}
+            />
+          </main>
+        ) : (
+          <main className="flex items-center justify-center min-h-64 rounded-2xl border-2 border-dashed border-(--border) p-8 text-center">
+            <p>The game starts when everyone is ready.</p>
+          </main>
+        )}
       </div>
     </section>
   );
