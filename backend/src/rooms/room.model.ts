@@ -12,6 +12,7 @@ export interface Song {
     youtubeId: string;
     startTimestamp: number;
     submittedBy: string;
+    title: string;
 }
 
 export interface Player {

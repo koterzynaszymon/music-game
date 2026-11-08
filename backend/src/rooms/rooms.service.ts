@@ -10,6 +10,7 @@ import {
   MIN_SONGS_PER_PLAYER,
   Player,
   Room,
+  Song,
 } from './room.model.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
 
@@ -147,6 +148,37 @@ export class RoomsService {
     // All checks passed, so both changes happen together (never one without the other)
     room.songsPerPlayer = songsPerPlayer;
     room.status = 'submitting';
+    return room;
+  }
+  submitSong(code: string, id: string, song: Song): Room {
+    // YouTube video IDs: exactly 11 characters from A-Z, a-z, 0-9, "_" and "-"
+    const idRegex = /^[A-Za-z0-9_-]{11}$/;
+    const room = this.findRoomByCode(code);
+    song.title = song.title.trim().toLowerCase();
+    const player = room.players.get(id);
+    if(song.title === '') {
+      throw new BadRequestException('Song title cannot be empty');
+    }
+    if(song.startTimestamp < 0) {
+      throw new BadRequestException('Song start timestamp cannot be negative');
+    }
+    if(song.startTimestamp % 1 !== 0 || isNaN(song.startTimestamp)) {
+      throw new BadRequestException('Song start timestamp must be a whole number');
+    }
+    if(song.youtubeId === '' || song.youtubeId === null || song.youtubeId === undefined || song.youtubeId.trim() === '' || song.youtubeId.trim().length !== 11 || song.youtubeId.includes(' ') || !idRegex.test(song.youtubeId)) {
+      throw new BadRequestException('Song youtubeId is invalid');
+    }
+    if (!player) {
+      throw new NotFoundException('Player not found');
+    }
+    if(room.status !== 'submitting') {
+      throw new BadRequestException('You can only submit songs while songs are being submitted');
+    }
+    if(player.songs.length >= room.songsPerPlayer) {
+      throw new BadRequestException(`You can only submit ${room.songsPerPlayer} songs`);
+    }
+    song.submittedBy = id;
+    player.songs.push(song);
     return room;
   }
 }
