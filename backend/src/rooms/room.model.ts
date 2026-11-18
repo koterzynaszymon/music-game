@@ -29,19 +29,47 @@ export interface Room {
     players: Map<string, Player>;
     status: RoomStatus;
     songsPerPlayer: number;
+    playlist: Song[];
 }
 
+// What OTHER players may see about a player: no songs, because song titles are answers.
+export interface PublicPlayer {
+    id: string;
+    nickname: string;
+    score: number;
+    isReady: boolean;
+    songsSubmitted: number;
+}
+
+// What every client in the room receives.
 export interface PublicRoom {
     code: string;
     owner: string;
-    players: Record<string, Player>;
+    players: Record<string, PublicPlayer>;
     status: RoomStatus;
     songsPerPlayer: number;
 }
 
-export function toPublicRoom(room: Room): PublicRoom {
+function toPublicPlayer(player: Player): PublicPlayer {
     return {
-        ...room,
-        players: Object.fromEntries(room.players),
+        id: player.id,
+        nickname: player.nickname,
+        score: player.score,
+        isReady: player.isReady,
+        songsSubmitted: player.songs.length,
+    };
+}
+
+export function toPublicRoom(room: Room): PublicRoom {
+    const players: Record<string, PublicPlayer> = {};
+    for (const [id, player] of room.players) {
+        players[id] = toPublicPlayer(player);
+    }
+    return {
+        code: room.code,
+        owner: room.owner,
+        players,
+        status: room.status,
+        songsPerPlayer: room.songsPerPlayer,
     };
 }

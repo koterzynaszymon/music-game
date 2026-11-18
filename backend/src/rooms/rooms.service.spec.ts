@@ -275,4 +275,108 @@ describe('RoomsService', () => {
         it.todo("can two different players submit the same video?");
         it.todo("can a player who is already ready still add songs?");
     })
+
+    describe("startGame", () => {
+        const HOST = "1234567890";
+        const PLAYER = "1234567891";
+
+        // Test helper: submitting room, both players added 2 songs and pressed ready.
+        // Titles are chosen so that alphabetical order differs from submission order.
+        function createRoomReadyToStart(service: RoomsService) {
+            const room = createSubmittingRoomWithTwoPlayers(service); // songsPerPlayer = 2
+            service.submitSong(room.code, HOST, { youtubeId: "aaaaaaaaaaa", startTimestamp: 0, title: "delta" });
+            service.submitSong(room.code, HOST, { youtubeId: "bbbbbbbbbbb", startTimestamp: 0, title: "bravo" });
+            service.submitSong(room.code, PLAYER, { youtubeId: "ccccccccccc", startTimestamp: 0, title: "charlie" });
+            service.submitSong(room.code, PLAYER, { youtubeId: "ddddddddddd", startTimestamp: 0, title: "alpha" });
+            service.changePlayerReadyStatus(room.code, HOST);
+            service.changePlayerReadyStatus(room.code, PLAYER);
+            return room;
+        }
+
+        // A test double (a "stub"): instead of a random order, it always returns the
+        // songs sorted by title. That makes the expected playlist order predictable,
+        // and proves the service really uses the shuffler it was given.
+        const sortByTitleShuffler = {
+            shuffle: <T extends { title: string }>(items: T[]) =>
+                [...items].sort((a, b) => a.title.localeCompare(b.title)),
+        };
+
+        // --- happy path ---
+        it("a new room starts with an empty playlist", () => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            expect(room.playlist).toEqual([]);
+        })
+        it("moves the room to the playing phase", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            service.startGame(room.code, HOST);
+            expect(room.status).toBe("playing");
+        })
+        it("puts every submitted song from every player into the playlist exactly once", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            service.startGame(room.code, HOST);
+            const ids = room.playlist.map(song => song.youtubeId);
+            // Order-independent check: the real shuffler is random
+            expect(ids).toHaveLength(4);
+            expect(ids).toEqual(expect.arrayContaining(["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"]));
+        })
+        it("keeps who submitted each song (needed later: you can't score on your own song)", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            service.startGame(room.code, HOST);
+            const alpha = room.playlist.find(song => song.title === "alpha");
+            expect(alpha?.submittedBy).toBe(PLAYER);
+        })
+        it("orders the playlist using the injected shuffler", () => {
+            const service = new RoomsService(sortByTitleShuffler);
+            const room = createRoomReadyToStart(service);
+            service.startGame(room.code, HOST);
+            expect(room.playlist.map(song => song.title)).toEqual(["alpha", "bravo", "charlie", "delta"]);
+        })
+        it("returns the updated room (the gateway broadcasts it)", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            expect(service.startGame(room.code, HOST)).toBe(room);
+        })
+
+        // --- who / when ---
+        it("throws if the room does not exist", () => {
+            const service = new RoomsService();
+            expect(() => service.startGame("nope", HOST)).toThrow(NotFoundException);
+        })
+        it("only the owner can start the game", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            expect(() => service.startGame(room.code, PLAYER)).toThrow(ForbiddenException);
+            expect(room.status).toBe("submitting");
+            expect(room.playlist).toEqual([]);
+        })
+        it("cannot start while somebody is not ready", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            service.changePlayerReadyStatus(room.code, PLAYER); // un-ready
+            expect(() => service.startGame(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.status).toBe("submitting");
+            expect(room.playlist).toEqual([]);
+        })
+        it("cannot start while the host is still configuring", () => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            expect(() => service.startGame(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.status).toBe("configuring");
+        })
+        it("cannot start a game that is already running", () => {
+            const service = new RoomsService(sortByTitleShuffler);
+            const room = createRoomReadyToStart(service);
+            service.startGame(room.code, HOST);
+            expect(() => service.startGame(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.playlist).toHaveLength(4); // not rebuilt / doubled
+        })
+
+        it.todo("does starting require at least 2 players (nobody can score on their own song)?");
+        it.todo("does starting require every player to have submitted songsPerPlayer songs?");
+        it.todo("which song is playing now? (e.g. currentSongIndex starts at 0)");
+    })
 });
