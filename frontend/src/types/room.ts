@@ -1,5 +1,6 @@
 // Mirrors PublicRoom in backend/src/rooms/room.model.ts (what the server sends over the socket)
 
+// Only ever your OWN songs (sent privately in roomJoined / songSubmitted)
 export type Song = {
   youtubeId: string;
   startTimestamp: number;
@@ -7,12 +8,13 @@ export type Song = {
   title?: string;
 };
 
+// Mirrors PublicPlayer: other players' songs are hidden, only the count is public
 export type Player = {
   id: string;
   nickname: string;
   score: number;
   isReady: boolean;
-  songs: Song[];
+  songsSubmitted: number;
 };
 
 export type RoomStatus = "configuring" | "submitting" | "playing" | "finished";

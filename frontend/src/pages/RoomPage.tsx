@@ -1,29 +1,39 @@
 import { useNavigate, useParams } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Socket } from "socket.io-client";
 import io from "socket.io-client";
 import { getOrCreateClientId } from "../lib/clientId.ts";
 import { getClientNicknameFromStorage } from "../lib/clientId.ts";
 import type { Notice } from "../components/NoticeDialog.tsx";
-import type { Room } from "../types/room.ts";
+import type { Room, Song } from "../types/room.ts";
 import CopyCodeButton from "../components/room/CopyCodeButton.tsx";
 import PlayerList from "../components/room/PlayerList.tsx";
 import ReadyToggleButton from "../components/room/ReadyToggleButton.tsx";
 import SongsPerPlayerSetting from "../components/room/SongsPerPlayerSetting.tsx";
 import SongSubmissionPanel from "../components/room/SongSubmissionPanel.tsx";
+import StartGameButton from "../components/room/StartGameButton.tsx";
 import type { NewSong } from "../components/room/SongPicker.tsx";
 
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
-  const [socket, setSocket] = useState<Socket | null>(null);
+  // A ref, not state: the socket is only used inside event handlers and is
+  // never rendered, so changing it shouldn't (and doesn't) trigger a re-render
+  const socketRef = useRef<Socket | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
+  // Own songs live separately: the public room only has songsSubmitted counts
+  const [mySongs, setMySongs] = useState<Song[]>([]);
   const navigate = useNavigate();
-  function estabilishConnection() {
+
+  useEffect(() => {
     const newSocket = io(import.meta.env.VITE_API_URL, {
       reconnection: true,
     });
-    newSocket.on("roomJoined", (data: { room: Room }) => {
+    newSocket.on("roomJoined", (data: { room: Room; mySongs: Song[] }) => {
       setRoom(data.room);
+      setMySongs(data.mySongs);
+    });
+    newSocket.on("songSubmitted", (data: { songs: Song[] }) => {
+      setMySongs(data.songs);
     });
     newSocket.on("roomUpdated", (updatedRoom: Room) => {
       console.log("roomUpdated", updatedRoom);
@@ -59,25 +69,25 @@ export default function RoomPage() {
       nickname: getClientNicknameFromStorage(),
     });
 
-    setSocket(newSocket);
-    return newSocket;
-  }
+    newSocket.on("gameStarted", (data) => {
+      console.log("gameStarted", data); // TODO: testing only
+    });
+    socketRef.current = newSocket;
 
-  useEffect(() => {
-    const newSocket = estabilishConnection();
     return () => {
       newSocket.disconnect();
-      setSocket(null);
+      socketRef.current = null;
       setRoom(null);
+      setMySongs([]);
     };
-  }, [code]);
+  }, [code, navigate]);
 
   const userId = getOrCreateClientId();
   const me = room?.players[userId];
   const isHost = room?.owner === userId;
-
+  const everyoneReady = room ? Object.values(room.players).every(player => player.isReady) : false;
   function handleKickPlayer(targetId: string) {
-    socket?.emit("kickPlayer", {
+    socketRef.current?.emit("kickPlayer", {
       code: code,
       requesterId: userId,
       targetId: targetId,
@@ -86,7 +96,7 @@ export default function RoomPage() {
 
   function handleLeaveRoom() {
     // The host can't just leave: leaving as host closes the room for everyone
-    socket?.emit(isHost ? "closeRoom" : "leaveRoom", {
+    socketRef.current?.emit(isHost ? "closeRoom" : "leaveRoom", {
       code: code,
       id: userId,
     });
@@ -94,7 +104,7 @@ export default function RoomPage() {
   }
 
   function handleToggleReady() {
-    socket?.emit("changePlayerReadyStatus", {
+    socketRef.current?.emit("changePlayerReadyStatus", {
       code: code,
       id: userId,
     });
@@ -102,15 +112,22 @@ export default function RoomPage() {
 
   function handleSubmitSongsPerPlayer(songsPerPlayer: number) {
     // server broadcasts roomUpdated to everyone (us included)
-    socket?.emit("setSongsPerPlayer", {
+    socketRef.current?.emit("setSongsPerPlayer", {
       code: code,
       requesterId: userId,
       songsPerPlayer: songsPerPlayer,
     });
   }
 
+  function handleStartGame() {
+    socketRef.current?.emit("startGame", {
+      code: code,
+      requesterId: userId,
+    });
+  }
+
   function handleSubmitSong(song: NewSong) {
-    socket?.emit("submitSong", {
+    socketRef.current?.emit("submitSong", {
       code: code,
       id: userId,
       song: song,
@@ -156,13 +173,19 @@ export default function RoomPage() {
               />
             )}
           </div>
+
+          {isHost && everyoneReady && room?.status === "submitting" && (
+            <div className="mt-4">
+              <StartGameButton onStart={handleStartGame} />
+            </div>
+          )}
         </aside>
 
         {/* Game area: song submission now, the player/guess UI once the round starts */}
         {me && room?.status === "submitting" ? (
           <main>
             <SongSubmissionPanel
-              songs={me.songs}
+              songs={mySongs}
               songsPerPlayer={room.songsPerPlayer}
               onSubmitSong={handleSubmitSong}
             />
