@@ -14,7 +14,7 @@ import { LeaveRoomDto } from './dto/leave-room.dto.js';
 import { CloseRoomDto } from './dto/close-room.dto.js';
 import { SetSongsPerPlayerDto } from './dto/set-songs-per-player.dto.js';
 import { SubmitSongDto } from './dto/submit-song.dto.js';
-
+import { StartGameDto } from './dto/start-game.dto.js';
 
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
@@ -43,6 +43,7 @@ export class RoomsGateway {
       client.emit('roomJoined', {
         room: toPublicRoom(room),
         isNewPlayer: isNewPlayer,
+        mySongs: room.players.get(id)?.songs ?? [],
       });
     } catch (error) {
       // Dedicated event: the client is not in the room, so it should leave the room page instead of staying on an empty one
@@ -155,10 +156,36 @@ export class RoomsGateway {
     try {
       const room = this.roomsService.submitSong(code, id, song);
       this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+      // Private reply with the submitter's full list (the public room has only a count)
       client.emit('songSubmitted', {
-        song: song,
+        songs: room.players.get(id)?.songs ?? [],
       });
     } catch (error) {
+      client.emit('error', {
+        message: (error as Error).message,
+      });
+      return;
+    }
+  }
+  @SubscribeMessage('startGame')
+  handleStartGame(
+    @MessageBody() dto: StartGameDto,
+    @ConnectedSocket() client: Socket,
+  ) {
+    const { code, requesterId } = dto;
+    try {
+      const room = this.roomsService.startGame(code, requesterId);
+      this.server.to(room.code).emit('roomUpdated', toPublicRoom(room));
+      // TODO: ONLY FOR TESTING, DELETE LATER
+      client.emit('gameStarted', {
+        playlist: room.playlist.map(song => ({
+          youtubeId: song.youtubeId,
+          startTimestamp: song.startTimestamp,
+          title: song.title,
+        })),
+      });
+    }
+    catch (error) {
       client.emit('error', {
         message: (error as Error).message,
       });
