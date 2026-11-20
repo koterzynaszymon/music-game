@@ -30,6 +30,10 @@ export interface Room {
     status: RoomStatus;
     songsPerPlayer: number;
     playlist: Song[];
+    currentSongIndex: number;
+    currentSongStartTime: number | null;
+    guessedBy: Set<string>;
+    songLoadedBy: Set<string>;
 }
 
 // What OTHER players may see about a player: no songs, because song titles are answers.
@@ -48,6 +52,7 @@ export interface PublicRoom {
     players: Record<string, PublicPlayer>;
     status: RoomStatus;
     songsPerPlayer: number;
+    currentSong: {youtubeId: string, startTimestamp: number};
 }
 
 function toPublicPlayer(player: Player): PublicPlayer {
