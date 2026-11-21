@@ -17,7 +17,16 @@ export type Player = {
   songsSubmitted: number;
 };
 
-export type RoomStatus = "configuring" | "submitting" | "playing" | "finished";
+// Payload of the "loadSong" event (see loadSongPayload in rooms.gateway.ts).
+// No title on purpose: it's the answer.
+export type CurrentSong = {
+  youtubeId: string;
+  startTimestamp: number;
+  index: number; // 0-based position in the playlist
+  total: number;
+};
+
+export type RoomStatus ="configuring" | "submitting" | "playing" | "finished";
 
 export type Room = {
   code: string;

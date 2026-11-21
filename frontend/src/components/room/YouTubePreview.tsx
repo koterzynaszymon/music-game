@@ -3,13 +3,15 @@ import { loadYoutubeIframeApi, type YouTubePlayer } from "../../lib/youtube.ts";
 
 type YouTubePreviewProps = {
   videoId: string;
+  // Second of the video where playback begins (optional, defaults to the beginning)
+  start?: number;
   // Called with the player once it's ready, and with null when it goes away
   onPlayerChange: (player: YouTubePlayer | null) => void;
   onError: (code: number) => void;
 };
 
 // Mount with key={videoId} so a new video gets a fresh player.
-export default function YouTubePreview({ videoId, onPlayerChange, onError }: YouTubePreviewProps) {
+export default function YouTubePreview({ videoId, start = 0, onPlayerChange, onError }: YouTubePreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const onPlayerChangeRef = useRef(onPlayerChange);
@@ -36,7 +38,7 @@ export default function YouTubePreview({ videoId, onPlayerChange, onError }: You
           videoId,
           width: "100%",
           height: "100%",
-          playerVars: { playsinline: 1, rel: 0 },
+          playerVars: { playsinline: 1, rel: 0, start },
           events: {
             onReady: (event) => onPlayerChangeRef.current(event.target),
             onError: (event) => onErrorRef.current(event.data),
@@ -53,7 +55,7 @@ export default function YouTubePreview({ videoId, onPlayerChange, onError }: You
       onPlayerChangeRef.current(null);
       container.replaceChildren();
     };
-  }, [videoId]);
+  }, [videoId, start]);
 
   return (
     <div
