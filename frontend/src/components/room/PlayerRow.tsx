@@ -5,11 +5,13 @@ type PlayerRowProps = {
   player: Player;
   isMe: boolean;
   isOwner: boolean;
+  // During the game the score matters, not the ready status
+  showScore: boolean;
   canKick: boolean;
   onKick: (playerId: string) => void;
 };
 
-export default function PlayerRow({ player, isMe, isOwner, canKick, onKick }: PlayerRowProps) {
+export default function PlayerRow({ player, isMe, isOwner, showScore, canKick, onKick }: PlayerRowProps) {
   return (
     <li
       className={`grid grid-cols-[1fr_auto_3.5rem] items-center gap-3 px-4 py-2.5 border-b-2 border-(--border) last:border-b-0 ${isMe ? "bg-(--accent-bg)" : ""}`}
@@ -26,7 +28,11 @@ export default function PlayerRow({ player, isMe, isOwner, canKick, onKick }: Pl
         {isMe && <span className="text-sm text-(--accent)">(you)</span>}
       </span>
 
-      <ReadyStatus isReady={player.isReady} />
+      {showScore ? (
+        <span className="font-mono text-(--text-h)">{player.score} pts</span>
+      ) : (
+        <ReadyStatus isReady={player.isReady} />
+      )}
 
       <span className="text-right">
         {canKick && (
