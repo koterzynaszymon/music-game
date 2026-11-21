@@ -52,7 +52,6 @@ export interface PublicRoom {
     players: Record<string, PublicPlayer>;
     status: RoomStatus;
     songsPerPlayer: number;
-    currentSong: {youtubeId: string, startTimestamp: number};
 }
 
 function toPublicPlayer(player: Player): PublicPlayer {
