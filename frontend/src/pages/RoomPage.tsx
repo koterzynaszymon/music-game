@@ -17,6 +17,7 @@ import YouTubePreview from "../components/room/YouTubePreview.tsx";
 import GuessForm from "../components/room/GuessForm.tsx";
 import NextSongButton from "../components/room/NextSongButton.tsx";
 import Leaderboard from "../components/room/Leaderboard.tsx";
+import BackToLobbyButton from "../components/room/BackToLobbyButton.tsx";
 import { describeYoutubeError, type YouTubePlayer } from "../lib/youtube.ts";
 
 // Browsers block sound until the user has clicked something on the page.
@@ -94,6 +95,18 @@ export default function RoomPage() {
     // Sent to everyone when the host moves on: now the answer can be revealed
     newSocket.on("songEnded", (data: { title: string }) => {
       setLastSongTitle(data.title);
+    });
+    // The host started over. roomUpdated (sent right after) brings the fresh room;
+    // here we clear everything we keep OUTSIDE the room, so nothing from the
+    // previous game leaks into the next one
+    newSocket.on("roomReset", () => {
+      setMySongs([]);
+      setCurrentSong(null);
+      setLastSongTitle(null);
+      setGuessResult(null);
+      setSongHasStarted(false);
+      setNeedsSoundClick(false);
+      shouldPlayRef.current = false;
     });
     newSocket.on("error", (error: { message: string }) => {
       console.error(error);
@@ -246,6 +259,14 @@ export default function RoomPage() {
     });
   }
 
+  function handleResetRoom() {
+    // The server answers with roomReset, then roomUpdated (status "configuring")
+    socketRef.current?.emit("resetRoom", {
+      code: code,
+      requesterId: userId,
+    });
+  }
+
   function handleSubmitSong(song: NewSong) {
     socketRef.current?.emit("submitSong", {
       code: code,
@@ -367,6 +388,11 @@ export default function RoomPage() {
               </p>
             )}
             <Leaderboard players={Object.values(room.players)} userId={userId} />
+            {isHost ? (
+              <BackToLobbyButton onReset={handleResetRoom} />
+            ) : (
+              <p className="text-sm">Waiting for the host to start a new game…</p>
+            )}
           </main>
         ) : (
           <main className="flex items-center justify-center min-h-64 rounded-2xl border-2 border-dashed border-(--border) p-8 text-center">

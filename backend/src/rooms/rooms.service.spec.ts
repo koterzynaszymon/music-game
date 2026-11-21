@@ -74,6 +74,16 @@ function createPlayingRoom() {
     return { service, room, clock };
 }
 
+// Test helper: a game that has FINISHED, where HOST scored 3 points on "alpha".
+// Everything a reset must undo is "dirty" here: scores, ready flags, songs, playlist.
+function createFinishedRoom() {
+    const { service, room, clock } = createPlayingRoom();
+    clock.advanceSeconds(3);
+    service.submitGuess(room.code, HOST, "alpha");
+    for (let i = 0; i < 4; i++) service.nextSong(room.code, HOST); // past the last song
+    return { service, room, clock };
+}
+
 describe('RoomsService', () => {
     it("should create a new room", () => {
         const service = new RoomsService();
@@ -723,5 +733,123 @@ describe('RoomsService', () => {
         // --- rules you still have to decide on ---
         it.todo("what if a player leaves / is kicked while the others wait for them to load?");
         it.todo("timeout: start anyway after N seconds if someone never loads (needs fake timers)");
+    })
+
+    // After the leaderboard, the host sends everyone back to the lobby of the SAME room:
+    // same code, same people, but a fresh game (no songs, no scores, nobody ready).
+    describe("resetRoom", () => {
+        // --- happy path: the room goes back to its first state ---
+        it("moves a finished room back to the configuring phase", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.status).toBe("configuring");
+        })
+        it("clears the game: empty playlist, first song, no timer, nobody guessed or loaded", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.playlist).toEqual([]);
+            expect(room.currentSongIndex).toBe(0);
+            expect(room.currentSongStartTime).toBeNull();
+            expect(room.guessedBy.size).toBe(0);
+            expect(room.songLoadedBy.size).toBe(0);
+        })
+        it("returns the updated room (the gateway broadcasts it)", () => {
+            const { service, room } = createFinishedRoom();
+            expect(service.resetRoom(room.code, HOST)).toBe(room);
+        })
+
+        // --- the players stay, only their game data is reset ---
+        it("keeps everyone in the room, with the same nicknames", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.players.size).toBe(2);
+            expect(room.players.get(HOST)?.nickname).toBe("test");
+            expect(room.players.get(PLAYER)?.nickname).toBe("test2");
+        })
+        it("keeps the same host", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.owner).toBe(HOST);
+        })
+        it("resets every player's score to 0", () => {
+            const { service, room } = createFinishedRoom();
+            expect(room.players.get(HOST)?.score).toBe(3); // sanity check: there IS something to reset
+            service.resetRoom(room.code, HOST);
+            expect(room.players.get(HOST)?.score).toBe(0);
+            expect(room.players.get(PLAYER)?.score).toBe(0);
+        })
+        it("makes every player not ready", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.players.get(HOST)?.isReady).toBe(false);
+            expect(room.players.get(PLAYER)?.isReady).toBe(false);
+        })
+        it("clears every player's songs (everyone knows those answers now)", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.players.get(HOST)?.songs).toEqual([]);
+            expect(room.players.get(PLAYER)?.songs).toEqual([]);
+        })
+        it("keeps the previous songs per player (the host's setting starts from it)", () => {
+            const { service, room } = createFinishedRoom(); // songsPerPlayer = 2
+            service.resetRoom(room.code, HOST);
+            expect(room.songsPerPlayer).toBe(2);
+        })
+
+        // --- consequences of being back in "configuring" ---
+        it("new players can join again", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            const result = service.joinRoom(room.code, "1234567892", "latecomer");
+            expect(result.isNewPlayer).toBe(true);
+            expect(room.players.size).toBe(3);
+        })
+        it("a whole second game can be played after a reset", () => {
+            // Catches any field the reset forgets: the second game would break on it
+            const { service, room, clock } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            service.setSongsPerPlayer(room.code, HOST, 1);
+            service.submitSong(room.code, HOST, { youtubeId: "eeeeeeeeeee", startTimestamp: 0, title: "echo" } as never);
+            service.submitSong(room.code, PLAYER, { youtubeId: "fffffffffff", startTimestamp: 0, title: "foxtrot" } as never);
+            service.changePlayerReadyStatus(room.code, HOST);
+            service.changePlayerReadyStatus(room.code, PLAYER);
+            service.startGame(room.code, HOST);
+            expect(room.playlist.map(song => song.title)).toEqual(["echo", "foxtrot"]); // no old songs
+            loadSongForEveryone(service, room.code);
+            clock.advanceSeconds(5);
+            service.submitGuess(room.code, PLAYER, "echo");
+            expect(room.players.get(PLAYER)?.score).toBe(5); // counted from 0, not added to the old game
+        })
+
+        // --- who / when ---
+        it("throws if the room does not exist", () => {
+            const { service } = createFinishedRoom();
+            expect(() => service.resetRoom("nope", HOST)).toThrow(NotFoundException);
+        })
+        it("only the owner can reset the room, and nothing changes", () => {
+            const { service, room } = createFinishedRoom();
+            expect(() => service.resetRoom(room.code, PLAYER)).toThrow(ForbiddenException);
+            expect(room.status).toBe("finished");
+            expect(room.players.get(HOST)?.score).toBe(3);
+        })
+        it("cannot reset while a game is playing (only after it finished)", () => {
+            const { service, room, clock } = createPlayingRoom();
+            clock.advanceSeconds(3);
+            service.submitGuess(room.code, HOST, "alpha");
+            expect(() => service.resetRoom(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.status).toBe("playing");
+            expect(room.players.get(HOST)?.score).toBe(3);
+        })
+        it("cannot reset while songs are being submitted", () => {
+            const service = new RoomsService();
+            const room = createRoomReadyToStart(service);
+            expect(() => service.resetRoom(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.players.get(HOST)?.songs).toHaveLength(2); // songs not wiped
+        })
+        it("cannot reset a room that is still configuring", () => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            expect(() => service.resetRoom(room.code, HOST)).toThrow(BadRequestException);
+        })
     })
 });

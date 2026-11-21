@@ -317,4 +317,39 @@ describe("RoomsGateway", () => {
             expect(serverEmits[1].payload).toMatchObject({ status: "finished" });
         })
     })
+
+    describe("resetRoom", () => {
+        // Game played to the end, then the setup's emits are forgotten
+        function setupFinishedGame() {
+            const ctx = setupPlayingGame();
+            for (let i = 0; i < 4; i++) ctx.service.nextSong(ctx.room.code, HOST);
+            ctx.serverEmits.length = 0;
+            return ctx;
+        }
+
+        it("tells the room it was reset, then broadcasts the fresh room, in that order", () => {
+            // roomReset first: clients clear their own leftovers (mySongs, last title...)
+            // BEFORE the new room arrives and switches the view back to the lobby
+            const { gateway, room, serverEmits } = setupFinishedGame();
+            gateway.handleResetRoom({ code: room.code, requesterId: HOST });
+            expect(eventNames(toRoom(serverEmits, room.code))).toEqual(["roomReset", "roomUpdated"]);
+        })
+        it("the broadcast room is back in configuring with everyone still in it", () => {
+            const { gateway, room, serverEmits } = setupFinishedGame();
+            gateway.handleResetRoom({ code: room.code, requesterId: HOST });
+            const update = serverEmits.find((e) => e.event === "roomUpdated");
+            expect(update?.payload).toMatchObject({
+                status: "configuring",
+                players: {
+                    [HOST]: { score: 0, isReady: false, songsSubmitted: 0 },
+                    [PLAYER]: { score: 0, isReady: false, songsSubmitted: 0 },
+                },
+            });
+        })
+        it("a non-host cannot reset, and nothing is sent", () => {
+            const { gateway, room, serverEmits } = setupFinishedGame();
+            expect(() => gateway.handleResetRoom({ code: room.code, requesterId: PLAYER })).toThrow(ForbiddenException);
+            expect(serverEmits).toEqual([]);
+        })
+    })
 });

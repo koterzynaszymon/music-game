@@ -282,4 +282,30 @@ export class RoomsService {
     room.songLoadedBy.clear();
     return room;
   }
+
+  // Back to the lobby after the leaderboard: same room, same people, fresh game.
+  // songsPerPlayer is kept on purpose: it's the starting value of the host's setting.
+  resetRoom(code: string, requesterId: string): Room {
+    const room = this.findRoomByCode(code);
+    assertOwner(room, requesterId);
+    assertStatus(
+      room,
+      'finished',
+      'You can only go back to the lobby after the game has finished',
+    );
+    // The room: the same values createRoom starts with
+    room.status = 'configuring';
+    room.playlist = [];
+    room.currentSongIndex = 0;
+    room.currentSongStartTime = null;
+    room.guessedBy.clear();
+    room.songLoadedBy.clear();
+    // The players stay, only their game data is reset
+    for (const player of playersOf(room)) {
+      player.score = 0;
+      player.isReady = false;
+      player.songs = [];
+    }
+    return room;
+  }
 }

@@ -21,6 +21,7 @@ import { currentSongOf } from './room.helpers.js';
 import { SongLoadedDto } from './dto/song-loaded.dto.js';
 import { SubmitGuessDto } from './dto/submit-guess.dto.js';
 import { NextSongDto } from './dto/next-song.dto.js';
+import { ResetRoomDto } from './dto/reset-room.dto.js';
 // Errors thrown by any handler are sent to the client as an "error" event by WsErrorFilter
 @UseFilters(WsErrorFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -220,5 +221,13 @@ export class RoomsGateway {
     this.broadcastRoom(room);
     // Does nothing once the game is finished (there is no current song)
     this.emitLoadSong(room);
+  }
+
+  @SubscribeMessage('resetRoom')
+  handleResetRoom(@MessageBody() dto: ResetRoomDto) {
+    const room = this.roomsService.resetRoom(dto.code, dto.requesterId);
+    this.server.to(room.code).emit('roomReset');
+    // Then: the fresh room, whose "configuring" status shows the lobby again
+    this.broadcastRoom(room);
   }
 }
