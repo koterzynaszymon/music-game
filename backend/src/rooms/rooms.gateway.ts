@@ -70,9 +70,9 @@ export class RoomsGateway {
   // Called by the timer, songDuration seconds after the song started.
   // No player sent a message here, so nothing would catch an error: an
   // uncaught throw inside a timer would crash the whole server. Hence try/catch.
-  private revealSong(code: string) {
+  private async revealSong(code: string) {
     try {
-      const { room, title } = this.roomsService.endCurrentSong(code);
+      const { room, title } = await this.roomsService.endCurrentSong(code);
       this.server.to(room.code).emit('songEnded', { title });
       this.broadcastRoom(room); // scores now include the no-guess penalty
     } catch (error) {
@@ -81,7 +81,7 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('joinRoom')
-  handleJoinRoom(
+  async handleJoinRoom(
     @MessageBody() dto: JoinRoomDto,
     @ConnectedSocket() client: Socket,
   ) {
@@ -89,7 +89,7 @@ export class RoomsGateway {
     // Own try/catch instead of the filter: a failed join needs a different
     // event, so the client leaves the room page instead of staying on an empty one
     try {
-      const { room, isNewPlayer } = this.roomsService.joinRoom(
+      const { room, isNewPlayer } = await this.roomsService.joinRoom(
         code,
         id,
         nickname,
@@ -132,26 +132,26 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('changePlayerReadyStatus')
-  handleChangePlayerReadyStatus(@MessageBody() dto: ChangePlayerReadyStatusDto) {
-    const room = this.roomsService.changePlayerReadyStatus(dto.code, dto.id);
+  async handleChangePlayerReadyStatus(@MessageBody() dto: ChangePlayerReadyStatusDto) {
+    const room = await this.roomsService.changePlayerReadyStatus(dto.code, dto.id);
     this.broadcastRoom(room);
   }
 
   @SubscribeMessage('kickPlayer')
-  handleKickPlayer(@MessageBody() dto: KickPlayerDto) {
+  async handleKickPlayer(@MessageBody() dto: KickPlayerDto) {
     const { code, requesterId, targetId } = dto;
-    const room = this.roomsService.kickPlayer(code, requesterId, targetId);
+    const room = await this.roomsService.kickPlayer(code, requesterId, targetId);
     this.server.to(targetId).emit('kicked');
     this.broadcastRoom(room);
   }
 
   @SubscribeMessage('leaveRoom')
-  handleLeaveRoom(
+  async handleLeaveRoom(
     @MessageBody() dto: LeaveRoomDto,
     @ConnectedSocket() client: Socket,
   ) {
     const { code, id } = dto;
-    const room = this.roomsService.leaveRoom(code, id);
+    const room = await this.roomsService.leaveRoom(code, id);
     this.server.to(id).emit('leftRoom');
     this.broadcastRoom(room);
     client.leave(room.code);
@@ -159,20 +159,20 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('closeRoom')
-  handleCloseRoom(
+  async handleCloseRoom(
     @MessageBody() dto: CloseRoomDto,
     @ConnectedSocket() client: Socket,
   ) {
-    const room = this.roomsService.closeRoom(dto.code, dto.id);
+    const room = await this.roomsService.closeRoom(dto.code, dto.id);
     this.songTimers.cancel(room.code);
     client.to(room.code).emit('roomClosed');
     this.server.in(room.code).socketsLeave(room.code);
   }
 
   @SubscribeMessage('setSongsPerPlayer')
-  handleSetSongsPerPlayer(@MessageBody() dto: SetSongsPerPlayerDto) {
+  async handleSetSongsPerPlayer(@MessageBody() dto: SetSongsPerPlayerDto) {
     const { code, requesterId, songsPerPlayer, songDuration } = dto;
-    const room = this.roomsService.setSongsPerPlayer(
+    const room = await this.roomsService.setSongsPerPlayer(
       code,
       requesterId,
       songsPerPlayer,
@@ -182,41 +182,43 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('submitSong')
-  handleSubmitSong(
+  async handleSubmitSong(
     @MessageBody() dto: SubmitSongDto,
     @ConnectedSocket() client: Socket,
   ) {
     const { code, id, song } = dto;
-    const room = this.roomsService.submitSong(code, id, song);
+    const room = await this.roomsService.submitSong(code, id, song);
     this.broadcastRoom(room);
     client.emit('songSubmitted', { songs: this.songsOf(room, id) });
   }
 
   @SubscribeMessage('startGame')
-  handleStartGame(@MessageBody() dto: StartGameDto) {
-    const room = this.roomsService.startGame(dto.code, dto.requesterId);
+  async handleStartGame(@MessageBody() dto: StartGameDto) {
+    const room = await this.roomsService.startGame(dto.code, dto.requesterId);
     this.broadcastRoom(room);
     this.emitLoadSong(room);
   }
 
   @SubscribeMessage('songLoaded')
-  handleSongLoaded(@MessageBody() dto: SongLoadedDto) {
+  async handleSongLoaded(@MessageBody() dto: SongLoadedDto) {
     const { code, id } = dto;
-    const { room, allLoaded } = this.roomsService.markSongLoaded(code, id);
+    const { room, allLoaded } = await this.roomsService.markSongLoaded(code, id);
     this.broadcastRoom(room);
     if(allLoaded) {
       this.server.to(room.code).emit('playSong');
 
-      this.songTimers.start(room.code, room.songDuration * 1000, () =>
-        this.revealSong(room.code),
-      );
+      // `void`: nobody waits for this Promise (a timer can't), and revealSong
+      // catches its own errors, so it's safe to let it run on its own
+      this.songTimers.start(room.code, room.songDuration * 1000, () => {
+        void this.revealSong(room.code);
+      });
     }
   }
 
   @SubscribeMessage('submitGuess')
-  handleSubmitGuess(@MessageBody() dto: SubmitGuessDto, @ConnectedSocket() client: Socket) {
+  async handleSubmitGuess(@MessageBody() dto: SubmitGuessDto, @ConnectedSocket() client: Socket) {
     const { code, id, guess } = dto;
-    const { room, correct } = this.roomsService.submitGuess(code, id, guess);
+    const { room, correct } = await this.roomsService.submitGuess(code, id, guess);
     if(correct) {
       this.broadcastRoom(room);
     } else {
@@ -226,10 +228,10 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('nextSong')
-  handleNextSong(@MessageBody() dto: NextSongDto) {
+  async handleNextSong(@MessageBody() dto: NextSongDto) {
     const { code, requesterId } = dto;
     
-    const room = this.roomsService.nextSong(code, requesterId);
+    const room = await this.roomsService.nextSong(code, requesterId);
     // Status may now be 'finished': the public room (with scores) is the leaderboard
     this.broadcastRoom(room);
     // Does nothing once the game is finished (there is no current song)
@@ -237,8 +239,8 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('resetRoom')
-  handleResetRoom(@MessageBody() dto: ResetRoomDto) {
-    const room = this.roomsService.resetRoom(dto.code, dto.requesterId);
+  async handleResetRoom(@MessageBody() dto: ResetRoomDto) {
+    const room = await this.roomsService.resetRoom(dto.code, dto.requesterId);
     this.server.to(room.code).emit('roomReset');
     // Then: the fresh room, whose "configuring" status shows the lobby again
     this.broadcastRoom(room);
