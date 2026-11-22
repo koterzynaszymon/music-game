@@ -1,10 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module.js';
 import { ValidationPipe } from '@nestjs/common';
-
+import { existsSync } from 'fs';
 async function bootstrap() {
+   if (existsSync('.env')) {
+     process.loadEnvFile();
+   }
   const app = await NestFactory.create(AppModule);
   app.setGlobalPrefix('api/v1');
+  app.enableShutdownHooks();
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true, // any property not declared in the DTO is stripped out

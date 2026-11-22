@@ -1,0 +1,13 @@
+# Services the app needs while developing. Start: docker compose up -d
+#                                            Stop:  docker compose down
+services:
+  redis:
+    image: redis:8
+    container_name: music-game-redis
+    ports:
+      - "6379:6379" # reachable from the backend at localhost:6379
+    volumes:
+      - redis-data:/data # Redis saves its snapshots here, so data survives recreating the container
+
+volumes:
+  redis-data:
