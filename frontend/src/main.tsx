@@ -3,9 +3,12 @@ import './index.css'
 import App from './App.tsx'
 import { BrowserRouter } from 'react-router-dom'
 import "@fontsource-variable/fredoka";
+import VolumeProvider from './components/VolumeProvider.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <BrowserRouter>
-    <App />
+    <VolumeProvider>
+      <App />
+    </VolumeProvider>
   </BrowserRouter>,
 )

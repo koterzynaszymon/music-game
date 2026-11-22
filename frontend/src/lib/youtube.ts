@@ -79,6 +79,7 @@ export interface YouTubePlayer {
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   playVideo(): void;
   pauseVideo(): void;
+  setVolume(volume: number): void; // 0-100 (ignored on iOS: only hardware buttons work there)
   destroy(): void;
 }
 
