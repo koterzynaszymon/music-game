@@ -129,6 +129,21 @@ code,
   }
 }
 
+/* Song time bar: shrinks from full to empty at a steady speed  */
+@keyframes song-timer-shrink {
+  0% {
+    transform: scaleX(1);
+    background-color: var(--accent);
+  }
+  70% {
+    background-color: var(--accent);
+  }
+  100% {
+    transform: scaleX(0);
+    background-color: #f87171; /* Tailwind red-400, same as the "wrong guess" text */
+  }
+}
+
 /* In the "components" layer so Tailwind utilities (layer "utilities")
    can override it, e.g. className="btn-primary [--btn-face:...]" */
 @layer components {
