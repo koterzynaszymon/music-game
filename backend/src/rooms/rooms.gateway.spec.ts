@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import type { Server, Socket } from "socket.io";
 import { RoomsGateway } from "./rooms.gateway.js";
 import { RoomsService } from "./rooms.service.js";
+import { SongTimers } from "./song-timers.js";
 
 // What these tests are about
 // --------------------------
@@ -47,6 +48,8 @@ function createFakeClient() {
         },
         join: vi.fn(),
         leave: vi.fn(),
+        // client.to(room).emit(...) = "everyone in the room except me" (used by closeRoom)
+        to: () => ({ emit: vi.fn() }),
     };
     return { client: client as unknown as Socket, emits, join: client.join };
 }
@@ -71,7 +74,8 @@ function createFakeClock(startMs = 1_000_000) {
 function setup() {
     const clock = createFakeClock();
     const service = new RoomsService(sortByTitleShuffler, clock);
-    const gateway = new RoomsGateway(service);
+    // The real SongTimers: tests that need time to pass turn on vi.useFakeTimers()
+    const gateway = new RoomsGateway(service, new SongTimers());
     const { server, emits } = createFakeServer();
     gateway.server = server;
     return { service, gateway, clock, serverEmits: emits };
@@ -83,10 +87,10 @@ function setup() {
 //   2 "charlie" ccccccccccc (by PLAYER)
 //   3 "delta"   aaaaaaaaaaa (by HOST)
 const TITLES = ["alpha", "bravo", "charlie", "delta"];
-function createReadyRoom(service: RoomsService) {
+function createReadyRoom(service: RoomsService, songDuration = 10) {
     const room = service.createRoom({ id: HOST, nickname: "host" });
     service.joinRoom(room.code, PLAYER, "player");
-    service.setSongsPerPlayer(room.code, HOST, 2);
+    service.setSongsPerPlayer(room.code, HOST, 2, songDuration);
     service.submitSong(room.code, HOST, { youtubeId: "aaaaaaaaaaa", startTimestamp: 0, title: "delta" } as never);
     service.submitSong(room.code, HOST, { youtubeId: "bbbbbbbbbbb", startTimestamp: 10, title: "bravo" } as never);
     service.submitSong(room.code, PLAYER, { youtubeId: "ccccccccccc", startTimestamp: 20, title: "charlie" } as never);
@@ -110,6 +114,23 @@ function setupPlayingGame() {
     const ctx = setupLoadingGame();
     ctx.service.markSongLoaded(ctx.room.code, HOST);
     ctx.service.markSongLoaded(ctx.room.code, PLAYER);
+    return ctx;
+}
+
+// Arrange-only shortcut: the current song's time is up (loading it first if needed).
+// Goes through the SERVICE, so no timer runs and nothing is emitted.
+function endCurrentSongNow(service: RoomsService, code: string) {
+    if (service.findRoomByCode(code).currentSongStartTime === null) {
+        service.markSongLoaded(code, HOST);
+        service.markSongLoaded(code, PLAYER);
+    }
+    service.endCurrentSong(code);
+}
+
+// First song played and revealed: the moment the host may press Next
+function setupRevealedGame() {
+    const ctx = setupPlayingGame();
+    endCurrentSongNow(ctx.service, ctx.room.code);
     return ctx;
 }
 
@@ -187,6 +208,14 @@ describe("RoomsGateway", () => {
             const loadSong = emits.filter((e) => e.event === "loadSong");
             expect(loadSong).toHaveLength(1);
             expect(mentionsAny(loadSong, TITLES)).toBe(false);
+        })
+        it("rejoining after time ran out: loadSong and the answer, but no playSong", () => {
+            const { gateway, room, serverEmits } = setupRevealedGame();
+            const { client, emits } = createFakeClient();
+            gateway.handleJoinRoom({ code: room.code, id: PLAYER, nickname: "player" }, client);
+            expect(eventNames(emits)).toEqual(["roomJoined", "loadSong", "songEnded"]);
+            expect(emits[2].payload).toEqual({ title: "alpha" });
+            expect(serverEmits).toEqual([]);
         })
     })
 
@@ -284,37 +313,107 @@ describe("RoomsGateway", () => {
         it.todo("playerGuessed { nickname } to the room on a correct guess?");
     })
 
-    describe("nextSong", () => {
-        it("reveals the title of the song that just ENDED (not the next one)", () => {
-            const { gateway, room, serverEmits } = setupPlayingGame();
-            gateway.handleNextSong({ code: room.code, requesterId: HOST });
-            expect(serverEmits).toContainEqual({ to: room.code, event: "songEnded", payload: { title: "alpha" } });
+    // Time limit: when the last player has loaded, the song plays for songDuration
+    // seconds, then the SERVER reveals the answer on its own (no player sends anything).
+    describe("song timer", () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        // Both players report loaded through the GATEWAY, which starts the timer
+        function startSongThroughGateway(songDuration = 10) {
+            const ctx = setup();
+            const room = createReadyRoom(ctx.service, songDuration);
+            ctx.service.startGame(room.code, HOST);
+            ctx.gateway.handleSongLoaded({ code: room.code, id: HOST });
+            ctx.gateway.handleSongLoaded({ code: room.code, id: PLAYER });
+            ctx.serverEmits.length = 0; // forget roomUpdated / playSong from loading
+            return { ...ctx, room };
+        }
+
+        it("nothing is revealed before the time is up", () => {
+            const { serverEmits } = startSongThroughGateway();
+            vi.advanceTimersByTime(9_999);
+            expect(eventNames(serverEmits)).not.toContain("songEnded");
         })
-        it("then broadcasts the room and tells everyone to load the next song, in that order", () => {
-            const { gateway, room, serverEmits } = setupPlayingGame();
+        it("when the time is up: reveals the title to the room, then broadcasts the room", () => {
+            const { room, serverEmits } = startSongThroughGateway();
+            vi.advanceTimersByTime(10_000);
+            expect(eventNames(toRoom(serverEmits, room.code))).toEqual(["songEnded", "roomUpdated"]);
+            expect(serverEmits[0].payload).toEqual({ title: "alpha" });
+        })
+        it("the broadcast room has the penalty applied and the song marked revealed", () => {
+            const { serverEmits } = startSongThroughGateway();
+            vi.advanceTimersByTime(10_000);
+            const update = serverEmits.find((e) => e.event === "roomUpdated");
+            expect(update?.payload).toMatchObject({
+                songRevealed: true,
+                players: { [HOST]: { score: 11 }, [PLAYER]: { score: 0 } }, // PLAYER submitted "alpha"
+            });
+        })
+        it("uses the room's song duration", () => {
+            const { serverEmits } = startSongThroughGateway(15);
+            vi.advanceTimersByTime(14_999);
+            expect(eventNames(serverEmits)).not.toContain("songEnded");
+            vi.advanceTimersByTime(1);
+            expect(eventNames(serverEmits)).toContain("songEnded");
+        })
+        it("a late songLoaded (refresh mid-song) does not start a second timer", () => {
+            const { gateway, room } = startSongThroughGateway();
+            gateway.handleSongLoaded({ code: room.code, id: PLAYER });
+            expect(vi.getTimerCount()).toBe(1);
+        })
+        it("closing the room mid-song cancels its timer", () => {
+            // Otherwise the timer fires later for a room that no longer exists
+            const { gateway, room } = startSongThroughGateway();
+            const { client } = createFakeClient();
+            gateway.handleCloseRoom({ code: room.code, id: HOST }, client);
+            expect(vi.getTimerCount()).toBe(0);
+        })
+    })
+
+    describe("nextSong", () => {
+        it("broadcasts the room and tells everyone to load the next song, in that order", () => {
+            const { gateway, room, serverEmits } = setupRevealedGame();
             gateway.handleNextSong({ code: room.code, requesterId: HOST });
-            expect(eventNames(toRoom(serverEmits, room.code))).toEqual(["songEnded", "roomUpdated", "loadSong"]);
+            expect(eventNames(toRoom(serverEmits, room.code))).toEqual(["roomUpdated", "loadSong"]);
             const loadSong = serverEmits.find((e) => e.event === "loadSong");
             expect(loadSong?.payload).toEqual({ youtubeId: "bbbbbbbbbbb", startTimestamp: 10, index: 1, total: 4 });
         })
+        it("does not reveal anything itself (the timer already sent songEnded)", () => {
+            const { gateway, room, serverEmits } = setupRevealedGame();
+            gateway.handleNextSong({ code: room.code, requesterId: HOST });
+            expect(eventNames(serverEmits)).not.toContain("songEnded");
+        })
         it("never reveals the NEXT song's title", () => {
-            const { gateway, room, serverEmits } = setupPlayingGame();
+            const { gateway, room, serverEmits } = setupRevealedGame();
             gateway.handleNextSong({ code: room.code, requesterId: HOST });
             expect(mentionsAny(serverEmits, ["bravo", "charlie", "delta"])).toBe(false);
         })
-        it("a non-host cannot skip, and nothing is revealed", () => {
-            const { gateway, room, serverEmits } = setupPlayingGame();
+        it("a non-host cannot move on, and nothing is sent", () => {
+            const { gateway, room, serverEmits } = setupRevealedGame();
             expect(() => gateway.handleNextSong({ code: room.code, requesterId: PLAYER })).toThrow(ForbiddenException);
             expect(serverEmits).toEqual([]);
         })
-        it("after the last song: reveals it, broadcasts the finished room, loads nothing", () => {
+        it("the host cannot move on before the answer is revealed, and nothing is sent", () => {
             const { gateway, room, serverEmits } = setupPlayingGame();
-            for (let i = 0; i < 3; i++) gateway.handleNextSong({ code: room.code, requesterId: HOST });
-            serverEmits.length = 0; // only look at the final skip
+            expect(() => gateway.handleNextSong({ code: room.code, requesterId: HOST })).toThrow(BadRequestException);
+            expect(serverEmits).toEqual([]);
+        })
+        it("after the last song: broadcasts the finished room, loads nothing", () => {
+            const { service, gateway, room, serverEmits } = setupPlayingGame();
+            for (let i = 0; i < 3; i++) {
+                endCurrentSongNow(service, room.code);
+                gateway.handleNextSong({ code: room.code, requesterId: HOST });
+            }
+            endCurrentSongNow(service, room.code);
+            serverEmits.length = 0; // only look at the final Next
             gateway.handleNextSong({ code: room.code, requesterId: HOST });
-            expect(eventNames(serverEmits)).toEqual(["songEnded", "roomUpdated"]);
-            expect(serverEmits[0].payload).toEqual({ title: "delta" });
-            expect(serverEmits[1].payload).toMatchObject({ status: "finished" });
+            expect(eventNames(serverEmits)).toEqual(["roomUpdated"]);
+            expect(serverEmits[0].payload).toMatchObject({ status: "finished" });
         })
     })
 
@@ -322,7 +421,10 @@ describe("RoomsGateway", () => {
         // Game played to the end, then the setup's emits are forgotten
         function setupFinishedGame() {
             const ctx = setupPlayingGame();
-            for (let i = 0; i < 4; i++) ctx.service.nextSong(ctx.room.code, HOST);
+            for (let i = 0; i < 4; i++) {
+                endCurrentSongNow(ctx.service, ctx.room.code);
+                ctx.service.nextSong(ctx.room.code, HOST);
+            }
             ctx.serverEmits.length = 0;
             return ctx;
         }

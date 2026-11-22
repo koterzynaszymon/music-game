@@ -1,6 +1,11 @@
 export const MIN_SONGS_PER_PLAYER = 1;
 export const MAX_SONGS_PER_PLAYER = 5;
 
+// Seconds each song plays before the answer is revealed
+export const MIN_SONG_DURATION = 10;
+export const MAX_SONG_DURATION = 15;
+export const DEFAULT_SONG_DURATION = 10;
+
 // Room lifecycle:
 //   configuring -> host picks songs per player, new players may join
 //   submitting  -> players add their songs and press ready, no new players
@@ -29,9 +34,11 @@ export interface Room {
     players: Map<string, Player>;
     status: RoomStatus;
     songsPerPlayer: number;
+    songDuration: number;
     playlist: Song[];
     currentSongIndex: number;
     currentSongStartTime: number | null;
+    songRevealed: boolean;
     guessedBy: Set<string>;
     songLoadedBy: Set<string>;
 }
@@ -52,6 +59,8 @@ export interface PublicRoom {
     players: Record<string, PublicPlayer>;
     status: RoomStatus;
     songsPerPlayer: number;
+    songDuration: number;
+    songRevealed: boolean;
 }
 
 function toPublicPlayer(player: Player): PublicPlayer {
@@ -75,5 +84,7 @@ export function toPublicRoom(room: Room): PublicRoom {
         players,
         status: room.status,
         songsPerPlayer: room.songsPerPlayer,
+        songDuration: room.songDuration,
+        songRevealed: room.songRevealed,
     };
 }

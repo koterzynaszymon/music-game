@@ -6,7 +6,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import {
+  DEFAULT_SONG_DURATION,
+  MAX_SONG_DURATION,
   MAX_SONGS_PER_PLAYER,
+  MIN_SONG_DURATION,
   MIN_SONGS_PER_PLAYER,
   Player,
   Room,
@@ -46,9 +49,11 @@ export class RoomsService {
       players: new Map<string, Player>(),
       status: 'configuring',
       songsPerPlayer: 2,
+      songDuration: DEFAULT_SONG_DURATION,
       playlist: [],
       currentSongIndex: 0,
       currentSongStartTime: null,
+      songRevealed: false,
       guessedBy: new Set(),
       songLoadedBy: new Set(),
     };
@@ -137,6 +142,7 @@ export class RoomsService {
     code: string,
     requesterId: string,
     songsPerPlayer: number,
+    songDuration: number = DEFAULT_SONG_DURATION,
   ): Room {
     const room = this.findRoomByCode(code);
     assertOwner(room, requesterId);
@@ -154,8 +160,18 @@ export class RoomsService {
         `Songs per player must be a whole number from ${MIN_SONGS_PER_PLAYER} to ${MAX_SONGS_PER_PLAYER}`,
       );
     }
-    // All checks passed, so both changes happen together (never one without the other)
+    if (
+      !Number.isInteger(songDuration) ||
+      songDuration < MIN_SONG_DURATION ||
+      songDuration > MAX_SONG_DURATION
+    ) {
+      throw new BadRequestException(
+        `Song duration must be a whole number of seconds from ${MIN_SONG_DURATION} to ${MAX_SONG_DURATION}`,
+      );
+    }
+    // All checks passed, so all changes happen together (never one without the others)
     room.songsPerPlayer = songsPerPlayer;
+    room.songDuration = songDuration;
     room.status = 'submitting';
     return room;
   }
@@ -219,6 +235,7 @@ export class RoomsService {
     room.status = 'playing';
     room.currentSongIndex = 0;
     room.currentSongStartTime = null;
+    room.songRevealed = false;
     room.guessedBy = new Set();
     room.songLoadedBy = new Set();
     return room;
@@ -244,9 +261,14 @@ export class RoomsService {
     if (room.currentSongStartTime === null) {
       throw new BadRequestException('No song start time is recorded');
     }
-    // Guesses that can never score are ignored, not errors:
-    // already scored on this song, or it's your own song (you know the title)
-    if (room.guessedBy.has(id) || currentSong.submittedBy === id) {
+    // Guesses that can never score are ignored, not errors: time already ran out
+    // (a guess can arrive a moment late), already scored on this song,
+    // or it's your own song (you know the title)
+    if (
+      room.songRevealed ||
+      room.guessedBy.has(id) ||
+      currentSong.submittedBy === id
+    ) {
       return { room, correct: false };
     }
     // Titles are stored trimmed + lowercase (see submitSong), so compare the same way
@@ -258,6 +280,36 @@ export class RoomsService {
     );
     room.guessedBy.add(id);
     return { room, correct: true };
+  }
+
+
+  endCurrentSong(code: string): { room: Room; title: string } {
+    const room = this.findRoomByCode(code);
+    assertStatus(
+      room,
+      'playing',
+      'You can only end a song while the game is playing',
+    );
+    const currentSong = currentSongOf(room);
+    if (!currentSong) {
+      throw new BadRequestException('No song is currently playing');
+    }
+    if (room.currentSongStartTime === null) {
+      throw new BadRequestException('The song has not started yet');
+    }
+    if (room.songRevealed) {
+      throw new BadRequestException('This song has already ended');
+    }
+    // Penalty: not guessing costs more than the slowest possible correct guess.
+    // The submitter is skipped: they aren't allowed to guess their own song.
+    for (const player of playersOf(room)) {
+      const couldGuess = player.id !== currentSong.submittedBy;
+      if (couldGuess && !room.guessedBy.has(player.id)) {
+        player.score += room.songDuration + 1;
+      }
+    }
+    room.songRevealed = true;
+    return { room, title: currentSong.title };
   }
 
   nextSong(code: string, requesterId: string): Room {
@@ -272,19 +324,26 @@ export class RoomsService {
     if (!currentSong) {
       throw new BadRequestException('No song is currently playing');
     }
+    if (!room.songRevealed) {
+      throw new BadRequestException(
+        'Wait until the time is up and the answer is shown',
+      );
+    }
     if (room.currentSongIndex === room.playlist.length - 1) {
       room.status = 'finished';
       return room;
     }
     room.currentSongIndex++;
     room.currentSongStartTime = null;
+    room.songRevealed = false;
     room.guessedBy.clear();
     room.songLoadedBy.clear();
     return room;
   }
 
   // Back to the lobby after the leaderboard: same room, same people, fresh game.
-  // songsPerPlayer is kept on purpose: it's the starting value of the host's setting.
+  // songsPerPlayer and songDuration are kept on purpose: they're the starting
+  // values of the host's settings.
   resetRoom(code: string, requesterId: string): Room {
     const room = this.findRoomByCode(code);
     assertOwner(room, requesterId);
@@ -298,6 +357,7 @@ export class RoomsService {
     room.playlist = [];
     room.currentSongIndex = 0;
     room.currentSongStartTime = null;
+    room.songRevealed = false;
     room.guessedBy.clear();
     room.songLoadedBy.clear();
     // The players stay, only their game data is reset

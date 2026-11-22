@@ -3,10 +3,10 @@ import { RoomsService } from "./rooms.service.js";
 
 // Test helper: a room where the host has already submitted songs per player,
 // so it is in the "submitting" phase. Keeps setup out of the tests that need it.
-function createSubmittingRoomWithTwoPlayers(service: RoomsService) {
+function createSubmittingRoomWithTwoPlayers(service: RoomsService, songDuration = 10) {
     const room = service.createRoom({ id: "1234567890", nickname: "test" });
     service.joinRoom(room.code, "1234567891", "test2");
-    service.setSongsPerPlayer(room.code, "1234567890", 2);
+    service.setSongsPerPlayer(room.code, "1234567890", 2, songDuration);
     return room;
 }
 
@@ -15,8 +15,8 @@ const PLAYER = "1234567891";
 
 // Test helper: submitting room, both players added 2 songs and pressed ready.
 // Titles are chosen so that alphabetical order differs from submission order.
-function createRoomReadyToStart(service: RoomsService) {
-    const room = createSubmittingRoomWithTwoPlayers(service); // songsPerPlayer = 2
+function createRoomReadyToStart(service: RoomsService, songDuration = 10) {
+    const room = createSubmittingRoomWithTwoPlayers(service, songDuration); // songsPerPlayer = 2
     service.submitSong(room.code, HOST, { youtubeId: "aaaaaaaaaaa", startTimestamp: 0, title: "delta" });
     service.submitSong(room.code, HOST, { youtubeId: "bbbbbbbbbbb", startTimestamp: 0, title: "bravo" });
     service.submitSong(room.code, PLAYER, { youtubeId: "ccccccccccc", startTimestamp: 0, title: "charlie" });
@@ -54,10 +54,10 @@ function loadSongForEveryone(service: RoomsService, code: string) {
 
 // Test helper: a game that has started but whose first song is still LOADING
 // (nobody has reported songLoaded yet, so the timer has not started).
-function createLoadingRoom() {
+function createLoadingRoom(songDuration = 10) {
     const clock = createFakeClock();
     const service = new RoomsService(sortByTitleShuffler, clock);
-    const room = createRoomReadyToStart(service);
+    const room = createRoomReadyToStart(service, songDuration);
     service.startGame(room.code, HOST);
     return { service, room, clock };
 }
@@ -68,10 +68,20 @@ function createLoadingRoom() {
 //   index 1: "bravo"   (submitted by HOST)
 //   index 2: "charlie" (submitted by PLAYER)
 //   index 3: "delta"   (submitted by HOST)
-function createPlayingRoom() {
-    const { service, room, clock } = createLoadingRoom();
+function createPlayingRoom(songDuration = 10) {
+    const { service, room, clock } = createLoadingRoom(songDuration);
     loadSongForEveryone(service, room.code);
     return { service, room, clock };
+}
+
+// Test helper: play the current song to its end, the way a real game does it:
+// (load it if needed) -> time runs out (endCurrentSong) -> host presses Next.
+function endSongAndNext(service: RoomsService, code: string) {
+    if (service.findRoomByCode(code).currentSongStartTime === null) {
+        loadSongForEveryone(service, code);
+    }
+    service.endCurrentSong(code);
+    return service.nextSong(code, HOST);
 }
 
 // Test helper: a game that has FINISHED, where HOST scored 3 points on "alpha".
@@ -80,7 +90,7 @@ function createFinishedRoom() {
     const { service, room, clock } = createPlayingRoom();
     clock.advanceSeconds(3);
     service.submitGuess(room.code, HOST, "alpha");
-    for (let i = 0; i < 4; i++) service.nextSong(room.code, HOST); // past the last song
+    for (let i = 0; i < 4; i++) endSongAndNext(service, room.code); // past the last song
     return { service, room, clock };
 }
 
@@ -246,6 +256,41 @@ describe('RoomsService', () => {
         it("throws if the room does not exist", () => {
             const service = new RoomsService();
             expect(() => service.setSongsPerPlayer("nope", "1234567890", 3)).toThrow(NotFoundException);
+        })
+
+        // --- song duration: how many seconds each song plays before the answer is shown ---
+        it("a new room plays each song for 10 seconds by default", () => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            expect(room.songDuration).toBe(10);
+        })
+        it("the owner sets the song duration together with songs per player", () => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            service.setSongsPerPlayer(room.code, HOST, 3, 15);
+            expect(room.songDuration).toBe(15);
+            expect(room.songsPerPlayer).toBe(3);
+        })
+        it("without a song duration, the default (10) is used", () => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            service.setSongsPerPlayer(room.code, HOST, 3);
+            expect(room.songDuration).toBe(10);
+        })
+        it.each([9, 16, 0, 12.5])("rejects song duration %s (whole seconds from 10 to 15): nothing changes", (songDuration) => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            expect(() => service.setSongsPerPlayer(room.code, HOST, 3, songDuration)).toThrow(BadRequestException);
+            // Both values are rejected together: songsPerPlayer must not be half-applied
+            expect(room.songDuration).toBe(10);
+            expect(room.songsPerPlayer).toBe(2);
+            expect(room.status).toBe("configuring");
+        })
+        it.each([10, 15])("accepts the boundary song duration %s", (songDuration) => {
+            const service = new RoomsService();
+            const room = service.createRoom({ id: HOST, nickname: "test" });
+            service.setSongsPerPlayer(room.code, HOST, 3, songDuration);
+            expect(room.songDuration).toBe(songDuration);
         })
     })
 
@@ -434,6 +479,10 @@ describe('RoomsService', () => {
             const { room } = createLoadingRoom();
             expect(room.currentSongIndex).toBe(0);
         })
+        it("the first song starts unrevealed", () => {
+            const { room } = createLoadingRoom();
+            expect(room.songRevealed).toBe(false);
+        })
 
         it.todo("does starting require at least 2 players (nobody can score on their own song)?");
         it.todo("does starting require every player to have submitted songsPerPlayer songs?");
@@ -476,7 +525,7 @@ describe('RoomsService', () => {
         it("measures time from the start of the CURRENT song, not the start of the game", () => {
             const { service, room, clock } = createPlayingRoom();
             clock.advanceSeconds(20);                 // song 0 plays for 20s
-            service.nextSong(room.code, HOST);        // song 1 ("bravo", by HOST) starts loading
+            endSongAndNext(service, room.code);        // song 1 ("bravo", by HOST) starts loading
             loadSongForEveryone(service, room.code);  // ...and starts playing now
             clock.advanceSeconds(4);
             service.submitGuess(room.code, PLAYER, "bravo");
@@ -492,12 +541,12 @@ describe('RoomsService', () => {
         })
         it("scores add up across songs", () => {
             const { service, room, clock } = createPlayingRoom();
-            service.nextSong(room.code, HOST);        // song 1 "bravo" (by HOST)
+            endSongAndNext(service, room.code);        // song 1 "bravo" (by HOST)
             loadSongForEveryone(service, room.code);
             clock.advanceSeconds(4);
             service.submitGuess(room.code, PLAYER, "bravo");
-            service.nextSong(room.code, HOST);        // song 2 "charlie" (by PLAYER)
-            service.nextSong(room.code, HOST);        // song 3 "delta" (by HOST)
+            endSongAndNext(service, room.code);        // song 2 "charlie" (by PLAYER)
+            endSongAndNext(service, room.code);        // song 3 "delta" (by HOST)
             loadSongForEveryone(service, room.code);
             clock.advanceSeconds(5);
             service.submitGuess(room.code, PLAYER, "delta");
@@ -530,6 +579,15 @@ describe('RoomsService', () => {
             expect(room.players.get(PLAYER)?.score).toBe(0);
             expect(room.guessedBy.has(PLAYER)).toBe(false);
         })
+        it("a guess after time ran out is ignored: correct: false, no points, not marked as guessed", () => {
+            // Ignored, not an error: a guess sent at 9.99s can arrive just after the reveal
+            const { service, room } = createPlayingRoom();
+            service.endCurrentSong(room.code); // HOST didn't guess: 10 + 1 = 11 points
+            const result = service.submitGuess(room.code, HOST, "alpha");
+            expect(result.correct).toBe(false);
+            expect(room.players.get(HOST)?.score).toBe(11);
+            expect(room.guessedBy.has(HOST)).toBe(false);
+        })
         it("guessing again after already scoring on this song is ignored", () => {
             const { service, room, clock } = createPlayingRoom();
             clock.advanceSeconds(3);
@@ -556,7 +614,7 @@ describe('RoomsService', () => {
         })
         it("cannot guess after the game has finished", () => {
             const { service, room } = createPlayingRoom();
-            for (let i = 0; i < 4; i++) service.nextSong(room.code, HOST); // past the last song
+            for (let i = 0; i < 4; i++) endSongAndNext(service, room.code); // past the last song
             expect(() => service.submitGuess(room.code, HOST, "delta")).toThrow(BadRequestException);
         })
 
@@ -585,21 +643,108 @@ describe('RoomsService', () => {
         it.todo("fuzzy title matching (typos, 'feat.', punctuation) - deferred in CLAUDE.md");
     })
 
+    // Called by the server's own timer when songDuration seconds have passed
+    // (not by a player, so there is no owner check).
+    // Playlist reminder: song 0 is "alpha", submitted by PLAYER.
+    describe("endCurrentSong", () => {
+        // --- the reveal ---
+        it("returns the title of the song, so the gateway can reveal it", () => {
+            const { service, room } = createPlayingRoom();
+            expect(service.endCurrentSong(room.code)).toEqual({ room, title: "alpha" });
+        })
+        it("marks the song as revealed", () => {
+            const { service, room } = createPlayingRoom();
+            service.endCurrentSong(room.code);
+            expect(room.songRevealed).toBe(true);
+        })
+        it("stays on the same song (the host moves on with nextSong)", () => {
+            const { service, room } = createPlayingRoom();
+            service.endCurrentSong(room.code);
+            expect(room.currentSongIndex).toBe(0);
+            expect(room.status).toBe("playing");
+        })
+
+        // --- penalty: not guessing costs songDuration + 1 ---
+        it("a player who didn't guess gets songDuration + 1 points", () => {
+            const { service, room } = createPlayingRoom(); // songDuration 10
+            service.endCurrentSong(room.code);
+            expect(room.players.get(HOST)?.score).toBe(11);
+        })
+        it("uses the room's own song duration", () => {
+            const { service, room } = createPlayingRoom(15);
+            service.endCurrentSong(room.code);
+            expect(room.players.get(HOST)?.score).toBe(16);
+        })
+        it("a player who guessed keeps their score (no penalty)", () => {
+            const { service, room, clock } = createPlayingRoom();
+            clock.advanceSeconds(3);
+            service.submitGuess(room.code, HOST, "alpha");
+            service.endCurrentSong(room.code);
+            expect(room.players.get(HOST)?.score).toBe(3);
+        })
+        it("the player who submitted the song gets no penalty (they can't guess it)", () => {
+            const { service, room } = createPlayingRoom();
+            service.endCurrentSong(room.code);
+            expect(room.players.get(PLAYER)?.score).toBe(0);
+        })
+        it("the penalty is always worse than the slowest correct guess", () => {
+            // Guessing at the last moment (10s) must still beat not guessing at all (11)
+            const { service, room, clock } = createPlayingRoom();
+            clock.advanceSeconds(10);
+            service.submitGuess(room.code, HOST, "alpha");
+            expect(room.players.get(HOST)?.score).toBeLessThan(11);
+        })
+
+        // --- who / when ---
+        it("cannot end the same song twice (the penalty must not be given twice)", () => {
+            const { service, room } = createPlayingRoom();
+            service.endCurrentSong(room.code);
+            expect(() => service.endCurrentSong(room.code)).toThrow(BadRequestException);
+            expect(room.players.get(HOST)?.score).toBe(11);
+        })
+        it("cannot end a song that hasn't started yet (still loading)", () => {
+            const { service, room } = createLoadingRoom();
+            expect(() => service.endCurrentSong(room.code)).toThrow(BadRequestException);
+            expect(room.songRevealed).toBe(false);
+        })
+        it("cannot end a song before the game has started", () => {
+            const service = new RoomsService(sortByTitleShuffler, createFakeClock());
+            const room = createRoomReadyToStart(service);
+            expect(() => service.endCurrentSong(room.code)).toThrow(BadRequestException);
+        })
+        it("throws if the room does not exist (e.g. it was closed mid-song)", () => {
+            const { service } = createPlayingRoom();
+            expect(() => service.endCurrentSong("nope")).toThrow(NotFoundException);
+        })
+    })
+
     describe("nextSong", () => {
+        // The first song has played and its time ran out: the answer is on screen,
+        // and this is the moment the host may press Next
+        function createRevealedRoom() {
+            const ctx = createPlayingRoom();
+            ctx.service.endCurrentSong(ctx.room.code);
+            return ctx;
+        }
+
         // --- happy path ---
         it("moves to the next song in the playlist", () => {
-            const { service, room } = createPlayingRoom();
+            const { service, room } = createRevealedRoom();
             service.nextSong(room.code, HOST);
             expect(room.currentSongIndex).toBe(1);
         })
         it("stops the timer: the new song has to be loaded before it starts", () => {
-            const { service, room, clock } = createPlayingRoom();
-            clock.advanceSeconds(30);
+            const { service, room } = createRevealedRoom();
             service.nextSong(room.code, HOST);
             expect(room.currentSongStartTime).toBeNull();
         })
+        it("the new song starts unrevealed (guessing is open again)", () => {
+            const { service, room } = createRevealedRoom();
+            service.nextSong(room.code, HOST);
+            expect(room.songRevealed).toBe(false);
+        })
         it("forgets who loaded the previous song (everyone must load the new one)", () => {
-            const { service, room } = createPlayingRoom();
+            const { service, room } = createRevealedRoom();
             service.nextSong(room.code, HOST);
             service.markSongLoaded(room.code, HOST); // only one of two players
             expect(room.currentSongStartTime).toBeNull();
@@ -608,46 +753,45 @@ describe('RoomsService', () => {
             const { service, room, clock } = createPlayingRoom();
             clock.advanceSeconds(3);
             service.submitGuess(room.code, HOST, "alpha");
+            service.endCurrentSong(room.code);
             service.nextSong(room.code, HOST);
             expect(room.guessedBy.size).toBe(0);
         })
         it("does not change anyone's score", () => {
-            const { service, room, clock } = createPlayingRoom();
-            clock.advanceSeconds(3);
-            service.submitGuess(room.code, HOST, "alpha");
+            const { service, room } = createRevealedRoom();
+            const before = [room.players.get(HOST)?.score, room.players.get(PLAYER)?.score];
             service.nextSong(room.code, HOST);
-            expect(room.players.get(HOST)?.score).toBe(3);
-            expect(room.players.get(PLAYER)?.score).toBe(0);
+            expect([room.players.get(HOST)?.score, room.players.get(PLAYER)?.score]).toEqual(before);
         })
         it("returns the updated room (the gateway broadcasts it)", () => {
-            const { service, room } = createPlayingRoom();
+            const { service, room } = createRevealedRoom();
             expect(service.nextSong(room.code, HOST)).toBe(room);
         })
 
         // --- end of the playlist ---
         it("stays playing while there are songs left", () => {
             const { service, room } = createPlayingRoom();
-            for (let i = 0; i < 3; i++) service.nextSong(room.code, HOST); // now on the last song (index 3)
+            for (let i = 0; i < 3; i++) endSongAndNext(service, room.code); // now on the last song (index 3)
             expect(room.status).toBe("playing");
         })
         it("finishes the game after the last song", () => {
             const { service, room } = createPlayingRoom();
-            for (let i = 0; i < 4; i++) service.nextSong(room.code, HOST);
+            for (let i = 0; i < 4; i++) endSongAndNext(service, room.code);
             expect(room.status).toBe("finished");
         })
         it("cannot skip once the game is finished", () => {
             const { service, room } = createPlayingRoom();
-            for (let i = 0; i < 4; i++) service.nextSong(room.code, HOST);
+            for (let i = 0; i < 4; i++) endSongAndNext(service, room.code);
             expect(() => service.nextSong(room.code, HOST)).toThrow(BadRequestException);
         })
 
         // --- who / when ---
         it("throws if the room does not exist", () => {
-            const { service } = createPlayingRoom();
+            const { service } = createRevealedRoom();
             expect(() => service.nextSong("nope", HOST)).toThrow(NotFoundException);
         })
         it("only the owner can skip to the next song", () => {
-            const { service, room } = createPlayingRoom();
+            const { service, room } = createRevealedRoom();
             expect(() => service.nextSong(room.code, PLAYER)).toThrow(ForbiddenException);
             expect(room.currentSongIndex).toBe(0);
         })
@@ -655,6 +799,16 @@ describe('RoomsService', () => {
             const service = new RoomsService(sortByTitleShuffler, createFakeClock());
             const room = createRoomReadyToStart(service);
             expect(() => service.nextSong(room.code, HOST)).toThrow(BadRequestException);
+        })
+        it("cannot move on while the song is still playing (the answer isn't revealed yet)", () => {
+            const { service, room } = createPlayingRoom();
+            expect(() => service.nextSong(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.currentSongIndex).toBe(0);
+        })
+        it("cannot move on while the song is still loading", () => {
+            const { service, room } = createLoadingRoom();
+            expect(() => service.nextSong(room.code, HOST)).toThrow(BadRequestException);
+            expect(room.currentSongIndex).toBe(0);
         })
 
         it.todo("what should currentSongStartTime be once the game is finished? (null?)");
@@ -726,7 +880,7 @@ describe('RoomsService', () => {
         })
         it("cannot report loaded after the game has finished", () => {
             const { service, room } = createPlayingRoom();
-            for (let i = 0; i < 4; i++) service.nextSong(room.code, HOST);
+            for (let i = 0; i < 4; i++) endSongAndNext(service, room.code);
             expect(() => service.markSongLoaded(room.code, HOST)).toThrow(BadRequestException);
         })
 
@@ -752,6 +906,12 @@ describe('RoomsService', () => {
             expect(room.currentSongStartTime).toBeNull();
             expect(room.guessedBy.size).toBe(0);
             expect(room.songLoadedBy.size).toBe(0);
+            expect(room.songRevealed).toBe(false);
+        })
+        it("keeps the previous song duration (like songs per player)", () => {
+            const { service, room } = createFinishedRoom();
+            service.resetRoom(room.code, HOST);
+            expect(room.songDuration).toBe(10);
         })
         it("returns the updated room (the gateway broadcasts it)", () => {
             const { service, room } = createFinishedRoom();
@@ -773,7 +933,7 @@ describe('RoomsService', () => {
         })
         it("resets every player's score to 0", () => {
             const { service, room } = createFinishedRoom();
-            expect(room.players.get(HOST)?.score).toBe(3); // sanity check: there IS something to reset
+            expect(room.players.get(HOST)?.score).toBeGreaterThan(0); // sanity check: there IS something to reset
             service.resetRoom(room.code, HOST);
             expect(room.players.get(HOST)?.score).toBe(0);
             expect(room.players.get(PLAYER)?.score).toBe(0);
@@ -828,9 +988,10 @@ describe('RoomsService', () => {
         })
         it("only the owner can reset the room, and nothing changes", () => {
             const { service, room } = createFinishedRoom();
+            const hostScoreBefore = room.players.get(HOST)?.score;
             expect(() => service.resetRoom(room.code, PLAYER)).toThrow(ForbiddenException);
             expect(room.status).toBe("finished");
-            expect(room.players.get(HOST)?.score).toBe(3);
+            expect(room.players.get(HOST)?.score).toBe(hostScoreBefore);
         })
         it("cannot reset while a game is playing (only after it finished)", () => {
             const { service, room, clock } = createPlayingRoom();

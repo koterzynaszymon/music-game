@@ -18,6 +18,8 @@ import GuessForm from "../components/room/GuessForm.tsx";
 import NextSongButton from "../components/room/NextSongButton.tsx";
 import Leaderboard from "../components/room/Leaderboard.tsx";
 import BackToLobbyButton from "../components/room/BackToLobbyButton.tsx";
+import SongTimerBar from "../components/room/SongTimerBar.tsx";
+import VolumeControl from "../components/VolumeControl.tsx";
 import { describeYoutubeError, type YouTubePlayer } from "../lib/youtube.ts";
 
 // Browsers block sound until the user has clicked something on the page.
@@ -53,8 +55,8 @@ export default function RoomPage() {
   const [songHasStarted, setSongHasStarted] = useState(false);
   // Answer to our last guess for the current song; null = no guess yet
   const [guessResult, setGuessResult] = useState<"correct" | "wrong" | null>(null);
-  // Title of the song that just ended (from "songEnded"), shown during the next one
-  const [lastSongTitle, setLastSongTitle] = useState<string | null>(null);
+  // The current song's answer, from "songEnded" when its time ran out; null while guessing
+  const [revealedTitle, setRevealedTitle] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -77,6 +79,7 @@ export default function RoomPage() {
       setNeedsSoundClick(false);
       setSongHasStarted(false);
       setGuessResult(null);
+      setRevealedTitle(null);
       setCurrentSong(song);
     });
     newSocket.on("playSong", () => {
@@ -92,9 +95,10 @@ export default function RoomPage() {
     newSocket.on("guessResult", (data: { correct: boolean }) => {
       setGuessResult(data.correct ? "correct" : "wrong");
     });
-    // Sent to everyone when the host moves on: now the answer can be revealed
+    // Sent to everyone by the server's timer when the time is up
     newSocket.on("songEnded", (data: { title: string }) => {
-      setLastSongTitle(data.title);
+      playerRef.current?.pauseVideo(); // stop the music
+      setRevealedTitle(data.title);
     });
     // The host started over. roomUpdated (sent right after) brings the fresh room;
     // here we clear everything we keep OUTSIDE the room, so nothing from the
@@ -102,7 +106,7 @@ export default function RoomPage() {
     newSocket.on("roomReset", () => {
       setMySongs([]);
       setCurrentSong(null);
-      setLastSongTitle(null);
+      setRevealedTitle(null);
       setGuessResult(null);
       setSongHasStarted(false);
       setNeedsSoundClick(false);
@@ -149,7 +153,7 @@ export default function RoomPage() {
       setRoom(null);
       setMySongs([]);
       setCurrentSong(null);
-      setLastSongTitle(null);
+      setRevealedTitle(null);
     };
   }, [code, navigate]);
 
@@ -190,12 +194,13 @@ export default function RoomPage() {
     });
   }
 
-  function handleSubmitSongsPerPlayer(songsPerPlayer: number) {
+  function handleSubmitSongsPerPlayer(songsPerPlayer: number, songDuration: number) {
     // server broadcasts roomUpdated to everyone (us included)
     socketRef.current?.emit("setSongsPerPlayer", {
       code: code,
       requesterId: userId,
       songsPerPlayer: songsPerPlayer,
+      songDuration: songDuration,
     });
   }
 
@@ -251,8 +256,8 @@ export default function RoomPage() {
   }
 
   function handleNextSong() {
-    // The server replies with songEnded (the answer), roomUpdated, and then
-    // loadSong for the next song, or status "finished" after the last one
+    // Only allowed after the answer is shown. The server replies with roomUpdated,
+    // then loadSong for the next song, or status "finished" after the last one
     socketRef.current?.emit("nextSong", {
       code: code,
       requesterId: userId,
@@ -284,7 +289,10 @@ export default function RoomPage() {
         >
           {isHost ? "← Close room" : "← Leave room"}
         </button>
-        {code && <CopyCodeButton code={code} />}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <VolumeControl />
+          {code && <CopyCodeButton code={code} />}
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-[20rem_1fr] gap-8 items-start">
@@ -297,7 +305,8 @@ export default function RoomPage() {
             <div className="mt-4">
               {isHost ? (
                 <SongsPerPlayerSetting
-                  initialValue={room.songsPerPlayer}
+                  initialSongsPerPlayer={room.songsPerPlayer}
+                  initialSongDuration={room.songDuration}
                   onSubmit={handleSubmitSongsPerPlayer}
                 />
               ) : (
@@ -321,7 +330,8 @@ export default function RoomPage() {
             </div>
           )}
 
-          {isHost && room?.status === "playing" && currentSong && (
+          {/* Only once the answer is shown (the server refuses earlier anyway) */}
+          {isHost && room?.status === "playing" && room.songRevealed && currentSong && (
             <div className="mt-4">
               <NextSongButton
                 isLastSong={currentSong.index === currentSong.total - 1}
@@ -343,12 +353,22 @@ export default function RoomPage() {
         ) : room?.status === "playing" && currentSong ? (
           <main className="flex flex-col gap-4">
             <h2>Song {currentSong.index + 1} of {currentSong.total}</h2>
-            {lastSongTitle && (
-              <p className="text-sm">
-                Last song was: <span className="font-semibold text-(--text-h)">{lastSongTitle}</span>
-              </p>
-            )}
-            {isMySong ? (
+            <SongTimerBar
+              key={currentSong.index}
+              phase={revealedTitle !== null ? "ended" : songHasStarted ? "running" : "waiting"}
+              durationSeconds={room.songDuration}
+            />
+            {revealedTitle !== null ? (
+              // Time's up: the answer replaces the guess box
+              <div className="flex flex-col gap-1">
+                <p className="m-0">⏱ Time's up! The answer was:</p>
+                <p className="m-0 text-2xl font-semibold text-(--text-h)">{revealedTitle}</p>
+                {guessResult === "correct" && (
+                  <p className="m-0 text-green-400 font-semibold">✅ You got it!</p>
+                )}
+                {!isHost && <p className="m-0 text-sm">Waiting for the host to play the next song…</p>}
+              </div>
+            ) : isMySong ? (
               <p>This is your song! Sit back and watch the others guess.</p>
             ) : guessResult === "correct" ? (
               <p className="text-green-400 font-semibold">✅ You got it!</p>
@@ -382,9 +402,9 @@ export default function RoomPage() {
           </main>
         ) : room?.status === "finished" ? (
           <main className="flex flex-col gap-4">
-            {lastSongTitle && (
+            {revealedTitle && (
               <p className="text-sm">
-                Last song was: <span className="font-semibold text-(--text-h)">{lastSongTitle}</span>
+                Last song was: <span className="font-semibold text-(--text-h)">{revealedTitle}</span>
               </p>
             )}
             <Leaderboard players={Object.values(room.players)} userId={userId} />

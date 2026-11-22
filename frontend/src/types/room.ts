@@ -34,4 +34,6 @@ export type Room = {
   players: Record<string, Player>;
   status: RoomStatus;
   songsPerPlayer: number;
+  songDuration: number; // seconds each song plays
+  songRevealed: boolean; // time ran out for the current song: answer shown, Next allowed
 };

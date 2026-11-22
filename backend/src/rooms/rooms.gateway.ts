@@ -22,13 +22,17 @@ import { SongLoadedDto } from './dto/song-loaded.dto.js';
 import { SubmitGuessDto } from './dto/submit-guess.dto.js';
 import { NextSongDto } from './dto/next-song.dto.js';
 import { ResetRoomDto } from './dto/reset-room.dto.js';
+import { SongTimers } from './song-timers.js';
 // Errors thrown by any handler are sent to the client as an "error" event by WsErrorFilter
 @UseFilters(WsErrorFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
 export class RoomsGateway {
   @WebSocketServer() server: Server;
 
-  constructor(private readonly roomsService: RoomsService) {}
+  constructor(
+    private readonly roomsService: RoomsService,
+    private readonly songTimers: SongTimers = new SongTimers(),
+  ) {}
 
   // Always goes through toPublicRoom, so song titles can't be broadcast by accident
   private broadcastRoom(room: Room) {
@@ -61,6 +65,19 @@ export class RoomsGateway {
       return;
     }
     this.server.to(room.code).emit('loadSong', payload);
+  }
+
+  // Called by the timer, songDuration seconds after the song started.
+  // No player sent a message here, so nothing would catch an error: an
+  // uncaught throw inside a timer would crash the whole server. Hence try/catch.
+  private revealSong(code: string) {
+    try {
+      const { room, title } = this.roomsService.endCurrentSong(code);
+      this.server.to(room.code).emit('songEnded', { title });
+      this.broadcastRoom(room); // scores now include the no-guess penalty
+    } catch (error) {
+      console.error(`Couldn't end the song in room ${code}:`, error);
+    }
   }
 
   @SubscribeMessage('joinRoom')
@@ -96,10 +113,14 @@ export class RoomsGateway {
       const payload = this.loadSongPayload(room); // undefined unless playing
       if (payload) {
         client.emit('loadSong', payload);
-        // If the song already started, the others won't wait for this client:
-        // its later "songLoaded" is ignored by the service, so no playSong would
-        // ever reach it. Tell it to play right away instead.
-        if (room.currentSongStartTime !== null) {
+        const song = currentSongOf(room);
+        if (room.songRevealed && song) {
+          // Time already ran out: show the answer, don't play
+          client.emit('songEnded', { title: song.title });
+        } else if (room.currentSongStartTime !== null) {
+          // If the song already started, the others won't wait for this client:
+          // its later "songLoaded" is ignored by the service, so no playSong would
+          // ever reach it. Tell it to play right away instead.
           client.emit('playSong');
         }
       }
@@ -143,17 +164,19 @@ export class RoomsGateway {
     @ConnectedSocket() client: Socket,
   ) {
     const room = this.roomsService.closeRoom(dto.code, dto.id);
+    this.songTimers.cancel(room.code);
     client.to(room.code).emit('roomClosed');
     this.server.in(room.code).socketsLeave(room.code);
   }
 
   @SubscribeMessage('setSongsPerPlayer')
   handleSetSongsPerPlayer(@MessageBody() dto: SetSongsPerPlayerDto) {
-    const { code, requesterId, songsPerPlayer } = dto;
+    const { code, requesterId, songsPerPlayer, songDuration } = dto;
     const room = this.roomsService.setSongsPerPlayer(
       code,
       requesterId,
       songsPerPlayer,
+      songDuration,
     );
     this.broadcastRoom(room);
   }
@@ -194,6 +217,10 @@ export class RoomsGateway {
     this.broadcastRoom(room);
     if(allLoaded) {
       this.server.to(room.code).emit('playSong');
+
+      this.songTimers.start(room.code, room.songDuration * 1000, () =>
+        this.revealSong(room.code),
+      );
     }
   }
 
@@ -212,11 +239,8 @@ export class RoomsGateway {
   @SubscribeMessage('nextSong')
   handleNextSong(@MessageBody() dto: NextSongDto) {
     const { code, requesterId } = dto;
-    const endedSong = currentSongOf(this.roomsService.findRoomByCode(code));
+    
     const room = this.roomsService.nextSong(code, requesterId);
-    if (endedSong) {
-      this.server.to(room.code).emit('songEnded', { title: endedSong.title });
-    }
     // Status may now be 'finished': the public room (with scores) is the leaderboard
     this.broadcastRoom(room);
     // Does nothing once the game is finished (there is no current song)
