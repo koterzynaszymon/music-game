@@ -31,6 +31,7 @@ import {
 import { Clock } from './clock.js';
 import { RoomsRepository } from './rooms.repository.js';
 import { InMemoryRoomsRepository } from './in-memory-rooms.repository.js';
+import { titlesMatch } from './title-matching.js';
 
 @Injectable()
 export class RoomsService {
@@ -228,10 +229,11 @@ export class RoomsService {
         );
       }
       // All checks passed: only now build the stored song. A new object, so the
-      // caller's input is left untouched.
+      // caller's input is left untouched. The title keeps its real spelling
+      // (it's shown on reveal); guesses are matched leniently in submitGuess.
       player.songs.push({
         ...song,
-        title: song.title.trim().toLowerCase(),
+        title: song.title.trim(),
         submittedBy: id,
       });
       return room;
@@ -295,8 +297,8 @@ export class RoomsService {
       ) {
         return { room, correct: false };
       }
-      // Titles are stored trimmed + lowercase (see submitSong), so compare the same way
-      if (guess.trim().toLowerCase() !== currentSong.title) {
+      // Case, punctuation and spaces don't matter, and small typos are forgiven
+      if (!titlesMatch(guess, currentSong.title)) {
         return { room, correct: false };
       }
       player.score += Math.floor(

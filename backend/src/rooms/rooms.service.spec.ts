@@ -362,11 +362,19 @@ describe('RoomsService', () => {
             await expect(service.submitSong(room.code, "1234567891", { ...validSong, title })).rejects.toThrow(BadRequestException);
             expect(room.players.get("1234567891")?.songs).toEqual([]);
         })
-        it("stores the title without surrounding spaces", async () => {
+        it("stores the title as typed (for the reveal), only without surrounding spaces", async () => {
+            // Matching ignores case and punctuation when COMPARING (see
+            // title-matching.ts), so the stored title can keep its real spelling
             const service = new RoomsService();
             const room = await createSubmittingRoomWithTwoPlayers(service);
-            await service.submitSong(room.code, "1234567891", { ...validSong, title: "  Never Gonna Give You Up  " });
-            expect(room.players.get("1234567891")?.songs[0].title).toBe("never gonna give you up");
+            await service.submitSong(room.code, "1234567891", { ...validSong, title: "  That's Life  " });
+            expect(room.players.get("1234567891")?.songs[0].title).toBe("That's Life");
+        })
+        it.each(["!!!", " - . ' "])("rejects a title with no letters or digits (%j): no guess could ever match it", async (title) => {
+            const service = new RoomsService();
+            const room = await createSubmittingRoomWithTwoPlayers(service);
+            await expect(service.submitSong(room.code, "1234567891", { ...validSong, title })).rejects.toThrow(BadRequestException);
+            expect(room.players.get("1234567891")?.songs).toEqual([]);
         })
         it.each([-1, 1.5, Number.NaN])("rejects start timestamp %s (must be a whole number >= 0)", async (startTimestamp) => {
             const service = new RoomsService();
@@ -516,12 +524,26 @@ describe('RoomsService', () => {
             await service.submitGuess(room.code, HOST, "alpha");
             expect(room.guessedBy.has(HOST)).toBe(true);
         })
-        it("ignores letter case and surrounding spaces (titles are stored trimmed + lowercase)", async () => {
+        it("ignores letter case and surrounding spaces", async () => {
             const { service, room, clock } = await createPlayingRoom();
             clock.advanceSeconds(3);
             const result = await service.submitGuess(room.code, HOST, "  ALPHA ");
             expect(result.correct).toBe(true);
             expect(room.players.get(HOST)?.score).toBe(3);
+        })
+        // The details of matching are tested in title-matching.spec.ts; these
+        // two only prove the service really uses it
+        it("ignores punctuation: 'al-pha!' scores on 'alpha'", async () => {
+            const { service, room, clock } = await createPlayingRoom();
+            clock.advanceSeconds(3);
+            const result = await service.submitGuess(room.code, HOST, "al-pha!");
+            expect(result.correct).toBe(true);
+        })
+        it("forgives a small typo: 'alpah' scores on 'alpha'", async () => {
+            const { service, room, clock } = await createPlayingRoom();
+            clock.advanceSeconds(3);
+            const result = await service.submitGuess(room.code, HOST, "alpah");
+            expect(result.correct).toBe(true);
         })
         it("measures time from the start of the CURRENT song, not the start of the game", async () => {
             const { service, room, clock } = await createPlayingRoom();

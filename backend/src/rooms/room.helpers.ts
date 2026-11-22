@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { NewSong, Player, Room, RoomStatus, Song } from './room.model.js';
+import { normalizeTitle } from './title-matching.js';
 
 // Small, stateless building blocks shared by RoomsService methods.
 // None of them touch the stored rooms: they get a room/song and either
@@ -54,6 +55,11 @@ export function assertStatus(
 export function validateSong(song: NewSong): void {
   if (song.title.trim() === '') {
     throw new BadRequestException('Song title cannot be empty');
+  }
+  // Guesses are compared after removing punctuation (see title-matching.ts):
+  // a title like "!!!" would become empty, and no guess could ever match it
+  if (normalizeTitle(song.title) === '') {
+    throw new BadRequestException('Song title must contain at least one letter or digit');
   }
   if (song.startTimestamp < 0) {
     throw new BadRequestException('Song start timestamp cannot be negative');
