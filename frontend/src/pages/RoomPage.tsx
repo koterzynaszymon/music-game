@@ -142,9 +142,6 @@ export default function RoomPage() {
       nickname: getClientNicknameFromStorage(),
     });
 
-    newSocket.on("gameStarted", (data) => {
-      console.log("gameStarted", data); // TODO: testing only
-    });
     socketRef.current = newSocket;
 
     return () => {

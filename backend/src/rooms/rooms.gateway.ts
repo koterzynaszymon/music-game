@@ -193,21 +193,10 @@ export class RoomsGateway {
   }
 
   @SubscribeMessage('startGame')
-  handleStartGame(
-    @MessageBody() dto: StartGameDto,
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleStartGame(@MessageBody() dto: StartGameDto) {
     const room = this.roomsService.startGame(dto.code, dto.requesterId);
     this.broadcastRoom(room);
     this.emitLoadSong(room);
-    // TODO: ONLY FOR TESTING, DELETE LATER
-    client.emit('gameStarted', {
-      playlist: room.playlist.map(song => ({
-        youtubeId: song.youtubeId,
-        startTimestamp: song.startTimestamp,
-        title: song.title,
-      })),
-    });
   }
 
   @SubscribeMessage('songLoaded')

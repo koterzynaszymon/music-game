@@ -223,8 +223,7 @@ describe("RoomsGateway", () => {
         it("broadcasts the room in the playing phase", () => {
             const { service, gateway, serverEmits } = setup();
             const room = createReadyRoom(service);
-            const { client } = createFakeClient();
-            gateway.handleStartGame({ code: room.code, requesterId: HOST }, client);
+            gateway.handleStartGame({ code: room.code, requesterId: HOST });
             const update = serverEmits.find((e) => e.event === "roomUpdated");
             expect(update?.to).toBe(room.code);
             expect(update?.payload).toMatchObject({ status: "playing" });
@@ -232,8 +231,7 @@ describe("RoomsGateway", () => {
         it("tells everyone to load the first song, with exactly these fields", () => {
             const { service, gateway, serverEmits } = setup();
             const room = createReadyRoom(service);
-            const { client } = createFakeClient();
-            gateway.handleStartGame({ code: room.code, requesterId: HOST }, client);
+            gateway.handleStartGame({ code: room.code, requesterId: HOST });
             const loadSong = serverEmits.find((e) => e.event === "loadSong");
             expect(loadSong?.to).toBe(room.code);
             // toEqual (not toMatchObject): an extra field like `title` fails the test
@@ -242,18 +240,16 @@ describe("RoomsGateway", () => {
         it("does not start playback yet (clients must load first)", () => {
             const { service, gateway, serverEmits } = setup();
             const room = createReadyRoom(service);
-            const { client, emits } = createFakeClient();
-            gateway.handleStartGame({ code: room.code, requesterId: HOST }, client);
+            gateway.handleStartGame({ code: room.code, requesterId: HOST });
             expect(eventNames(serverEmits)).not.toContain("playSong");
-            expect(eventNames(emits)).not.toContain("playSong");
         })
+        // handleStartGame no longer gets the host's socket at all, so the only
+        // way out is the room broadcast: that is what this checks
         it("never sends any song title to anyone, not even the host", () => {
             const { service, gateway, serverEmits } = setup();
             const room = createReadyRoom(service);
-            const { client, emits } = createFakeClient();
-            gateway.handleStartGame({ code: room.code, requesterId: HOST }, client);
+            gateway.handleStartGame({ code: room.code, requesterId: HOST });
             expect(mentionsAny(serverEmits, TITLES)).toBe(false);
-            expect(mentionsAny(emits, TITLES)).toBe(false);
         })
     })
 
