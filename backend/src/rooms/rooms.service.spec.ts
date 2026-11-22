@@ -29,9 +29,12 @@ function createRoomReadyToStart(service: RoomsService, songDuration = 10) {
 // A test double (a "stub"): instead of a random order, it always returns the
 // songs sorted by title. That makes the expected playlist order predictable,
 // and proves the service really uses the shuffler it was given.
+// Generic <T> like the real Shuffler, so TypeScript accepts it in its place;
+// titleOf reads the title from whatever item it gets (here: always a Song).
+const titleOf = (item: unknown) => (item as { title: string }).title;
 const sortByTitleShuffler = {
-    shuffle: <T extends { title: string }>(items: T[]) =>
-        [...items].sort((a, b) => a.title.localeCompare(b.title)),
+    shuffle: <T>(items: T[]): T[] =>
+        [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))),
 };
 
 // A test double (a "fake"): a clock the test controls by hand.
@@ -969,8 +972,8 @@ describe('RoomsService', () => {
             const { service, room, clock } = createFinishedRoom();
             service.resetRoom(room.code, HOST);
             service.setSongsPerPlayer(room.code, HOST, 1);
-            service.submitSong(room.code, HOST, { youtubeId: "eeeeeeeeeee", startTimestamp: 0, title: "echo" } as never);
-            service.submitSong(room.code, PLAYER, { youtubeId: "fffffffffff", startTimestamp: 0, title: "foxtrot" } as never);
+            service.submitSong(room.code, HOST, { youtubeId: "eeeeeeeeeee", startTimestamp: 0, title: "echo" });
+            service.submitSong(room.code, PLAYER, { youtubeId: "fffffffffff", startTimestamp: 0, title: "foxtrot" });
             service.changePlayerReadyStatus(room.code, HOST);
             service.changePlayerReadyStatus(room.code, PLAYER);
             service.startGame(room.code, HOST);

@@ -55,9 +55,10 @@ function createFakeClient() {
 }
 
 // Same fakes as in rooms.service.spec.ts (predictable order, hand-driven time)
+const titleOf = (item: unknown) => (item as { title: string }).title;
 const sortByTitleShuffler = {
-    shuffle: <T extends { title: string }>(items: T[]) =>
-        [...items].sort((a, b) => a.title.localeCompare(b.title)),
+    shuffle: <T>(items: T[]): T[] =>
+        [...items].sort((a, b) => titleOf(a).localeCompare(titleOf(b))),
 };
 function createFakeClock(startMs = 1_000_000) {
     let nowMs = startMs;
@@ -91,10 +92,10 @@ function createReadyRoom(service: RoomsService, songDuration = 10) {
     const room = service.createRoom({ id: HOST, nickname: "host" });
     service.joinRoom(room.code, PLAYER, "player");
     service.setSongsPerPlayer(room.code, HOST, 2, songDuration);
-    service.submitSong(room.code, HOST, { youtubeId: "aaaaaaaaaaa", startTimestamp: 0, title: "delta" } as never);
-    service.submitSong(room.code, HOST, { youtubeId: "bbbbbbbbbbb", startTimestamp: 10, title: "bravo" } as never);
-    service.submitSong(room.code, PLAYER, { youtubeId: "ccccccccccc", startTimestamp: 20, title: "charlie" } as never);
-    service.submitSong(room.code, PLAYER, { youtubeId: "ddddddddddd", startTimestamp: 30, title: "alpha" } as never);
+    service.submitSong(room.code, HOST, { youtubeId: "aaaaaaaaaaa", startTimestamp: 0, title: "delta" });
+    service.submitSong(room.code, HOST, { youtubeId: "bbbbbbbbbbb", startTimestamp: 10, title: "bravo" });
+    service.submitSong(room.code, PLAYER, { youtubeId: "ccccccccccc", startTimestamp: 20, title: "charlie" });
+    service.submitSong(room.code, PLAYER, { youtubeId: "ddddddddddd", startTimestamp: 30, title: "alpha" });
     service.changePlayerReadyStatus(room.code, HOST);
     service.changePlayerReadyStatus(room.code, PLAYER);
     return room;

@@ -11,9 +11,9 @@ import {
   MAX_SONGS_PER_PLAYER,
   MIN_SONG_DURATION,
   MIN_SONGS_PER_PLAYER,
+  NewSong,
   Player,
   Room,
-  Song,
 } from './room.model.js';
 import { CreateRoomDto } from './dto/create-room.dto.js';
 import { Shuffler } from './shuffler.js';
@@ -194,7 +194,7 @@ export class RoomsService {
     return {room, allLoaded: haveAllPlayersLoaded(room)};
   }
 
-  submitSong(code: string, id: string, song: Song): Room {
+  submitSong(code: string, id: string, song: NewSong): Room {
     const room = this.findRoomByCode(code);
     validateSong(song);
     const player = findPlayerOrThrow(room, id);
@@ -208,10 +208,13 @@ export class RoomsService {
         `You can only submit ${room.songsPerPlayer} songs`,
       );
     }
-    // All checks passed: only now modify the song and store it
-    song.title = song.title.trim().toLowerCase();
-    song.submittedBy = id;
-    player.songs.push(song);
+    // All checks passed: only now build the stored song. A new object, so the
+    // caller's input is left untouched.
+    player.songs.push({
+      ...song,
+      title: song.title.trim().toLowerCase(),
+      submittedBy: id,
+    });
     return room;
   }
 

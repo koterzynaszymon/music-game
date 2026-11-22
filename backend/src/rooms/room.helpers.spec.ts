@@ -19,10 +19,13 @@ function playingRoom(playerIds: string[], playlist: Song[], overrides: Partial<R
         players,
         status: "playing",
         songsPerPlayer: 1,
+        songDuration: 10,
         playlist,
         currentSongIndex: 0,
         currentSongStartTime: 0,
+        songRevealed: false,
         guessedBy: new Set(),
+        songLoadedBy: new Set(),
         ...overrides,
     };
 }

@@ -1,5 +1,5 @@
 import { IsString, IsNotEmpty, IsUUID, IsInt, Min, Max, IsObject } from 'class-validator';
-import type { Song } from '../room.model.js';
+import type { NewSong } from '../room.model.js';
 export class SubmitSongDto {
   @IsNotEmpty()
   @IsString()
@@ -10,5 +10,5 @@ export class SubmitSongDto {
   id: string;
   @IsObject()
   @IsNotEmpty()
-  song: Song;
+  song: NewSong;
 }

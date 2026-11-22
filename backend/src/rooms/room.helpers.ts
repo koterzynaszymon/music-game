@@ -3,7 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { Player, Room, RoomStatus, Song } from './room.model.js';
+import { NewSong, Player, Room, RoomStatus, Song } from './room.model.js';
 
 // Small, stateless building blocks shared by RoomsService methods.
 // None of them touch the stored rooms: they get a room/song and either
@@ -51,7 +51,7 @@ export function assertStatus(
 }
 
 // Only checks, never modifies the song (the caller normalizes it afterwards)
-export function validateSong(song: Song): void {
+export function validateSong(song: NewSong): void {
   if (song.title.trim() === '') {
     throw new BadRequestException('Song title cannot be empty');
   }

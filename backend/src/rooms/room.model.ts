@@ -20,6 +20,10 @@ export interface Song {
     title: string;
 }
 
+// A song as a player sends it: the server adds submittedBy itself
+// (never trust the client to say who submitted it).
+export type NewSong = Omit<Song, 'submittedBy'>;
+
 export interface Player {
     id: string;
     nickname: string;
