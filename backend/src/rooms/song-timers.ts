@@ -16,6 +16,12 @@ export class SongTimers {
     this.timers.set(code, timer);
   }
 
+  // Is a timer running for this room in THIS process? After a restart: no,
+  // even mid-song, because timers only live in memory.
+  has(code: string): boolean {
+    return this.timers.has(code);
+  }
+
   cancel(code: string): void {
     clearTimeout(this.timers.get(code)); // clearTimeout(undefined) is a no-op
     this.timers.delete(code);

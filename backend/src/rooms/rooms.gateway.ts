@@ -23,6 +23,7 @@ import { SubmitGuessDto } from './dto/submit-guess.dto.js';
 import { NextSongDto } from './dto/next-song.dto.js';
 import { ResetRoomDto } from './dto/reset-room.dto.js';
 import { SongTimers } from './song-timers.js';
+import { Clock } from './clock.js';
 // Errors thrown by any handler are sent to the client as an "error" event by WsErrorFilter
 @UseFilters(WsErrorFilter)
 @WebSocketGateway({ cors: { origin: '*' } })
@@ -32,6 +33,7 @@ export class RoomsGateway {
   constructor(
     private readonly roomsService: RoomsService,
     private readonly songTimers: SongTimers = new SongTimers(),
+    private readonly clock: Clock = new Clock(),
   ) {}
 
   // Always goes through toPublicRoom, so song titles can't be broadcast by accident
@@ -80,6 +82,34 @@ export class RoomsGateway {
     }
   }
 
+  // The "alarm clock" that reveals the answer when the time is up.
+  private startSongTimer(code: string, ms: number) {
+    this.songTimers.start(code, ms, () => {
+      void this.revealSong(code);
+    });
+  }
+
+  // Someone (re)joins while the current song has already started. 
+  private async catchUpOnStartedSong(room: Room, client: Socket) {
+    if (room.currentSongStartTime === null) {
+      return;
+    }
+    const elapsedMs = this.clock.now() - room.currentSongStartTime;
+    const remainingMs = room.songDuration * 1000 - elapsedMs;
+    const timerIsRunning = this.songTimers.has(room.code);
+
+    if (remainingMs <= 0) {
+      if (!timerIsRunning) {
+        await this.revealSong(room.code);
+      }
+      return;
+    }
+    client.emit('playSong', { offsetSeconds: elapsedMs / 1000 });
+    if (!timerIsRunning) {
+      this.startSongTimer(room.code, remainingMs);
+    }
+  }
+
   @SubscribeMessage('joinRoom')
   async handleJoinRoom(
     @MessageBody() dto: JoinRoomDto,
@@ -117,11 +147,11 @@ export class RoomsGateway {
         if (room.songRevealed && song) {
           // Time already ran out: show the answer, don't play
           client.emit('songEnded', { title: song.title });
-        } else if (room.currentSongStartTime !== null) {
+        } else {
           // If the song already started, the others won't wait for this client:
           // its later "songLoaded" is ignored by the service, so no playSong would
-          // ever reach it. Tell it to play right away instead.
-          client.emit('playSong');
+          // ever reach it. Tell it to play right away, from where the others are.
+          await this.catchUpOnStartedSong(room, client);
         }
       }
     } catch (error) {
@@ -207,11 +237,7 @@ export class RoomsGateway {
     if(allLoaded) {
       this.server.to(room.code).emit('playSong');
 
-      // `void`: nobody waits for this Promise (a timer can't), and revealSong
-      // catches its own errors, so it's safe to let it run on its own
-      this.songTimers.start(room.code, room.songDuration * 1000, () => {
-        void this.revealSong(room.code);
-      });
+      this.startSongTimer(room.code, room.songDuration * 1000);
     }
   }
 

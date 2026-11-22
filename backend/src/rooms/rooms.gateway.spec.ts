@@ -76,7 +76,8 @@ function setup() {
     const clock = createFakeClock();
     const service = new RoomsService(sortByTitleShuffler, clock);
     // The real SongTimers: tests that need time to pass turn on vi.useFakeTimers()
-    const gateway = new RoomsGateway(service, new SongTimers());
+    // The gateway gets the SAME fake clock as the service, so both agree on "now"
+    const gateway = new RoomsGateway(service, new SongTimers(), clock);
     const { server, emits } = createFakeServer();
     gateway.server = server;
     return { service, gateway, clock, serverEmits: emits };
@@ -367,6 +368,88 @@ describe("RoomsGateway", () => {
             const { client } = createFakeClient();
             await gateway.handleCloseRoom({ code: room.code, id: HOST }, client);
             expect(vi.getTimerCount()).toBe(0);
+        })
+    })
+
+    // A player refreshes in the middle of a song. Two separate problems:
+    //  1. their player should continue where everyone else is, not from the start
+    //  2. if the SERVER restarted, its timer is gone: the song must still end
+    // Both are solved from one stored fact: room.currentSongStartTime.
+    //
+    // Two clocks move here, and they are separate fakes: `clock` is what the
+    // service/gateway read as "now", vi.advanceTimersByTimeAsync moves setTimeout.
+    // A real second passing moves both, so the tests move both.
+    describe("rejoining mid-song", () => {
+        beforeEach(() => {
+            vi.useFakeTimers();
+        });
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        async function rejoin(gateway: RoomsGateway, code: string) {
+            const { client, emits } = createFakeClient();
+            await gateway.handleJoinRoom({ code, id: PLAYER, nickname: "player" }, client);
+            return emits;
+        }
+
+        // --- 1. playback in sync with the others ---
+        it("playSong tells the rejoining player how far into the song everyone is", async () => {
+            const { gateway, room, clock } = await setupPlayingGame();
+            clock.advanceSeconds(6);
+            const emits = await rejoin(gateway, room.code);
+            expect(emits).toContainEqual({ event: "playSong", payload: { offsetSeconds: 6 } });
+        })
+        it("the offset keeps milliseconds (seeking to 6.5s, not 6s, keeps the music in sync)", async () => {
+            const { gateway, room, clock } = await setupPlayingGame();
+            clock.advanceSeconds(6.5);
+            const emits = await rejoin(gateway, room.code);
+            expect(emits).toContainEqual({ event: "playSong", payload: { offsetSeconds: 6.5 } });
+        })
+
+        // --- 2a. the server's timer still runs: leave it alone ---
+        it("a rejoin while the timer runs does not start a second timer or move the end", async () => {
+            const ctx = setup();
+            const room = await createReadyRoom(ctx.service);
+            await ctx.service.startGame(room.code, HOST);
+            await ctx.gateway.handleSongLoaded({ code: room.code, id: HOST });
+            await ctx.gateway.handleSongLoaded({ code: room.code, id: PLAYER }); // timer: 10s
+            ctx.clock.advanceSeconds(3);
+            await vi.advanceTimersByTimeAsync(3_000);
+            await rejoin(ctx.gateway, room.code);
+            expect(vi.getTimerCount()).toBe(1);
+            await vi.advanceTimersByTimeAsync(7_000); // 10s after the start, not 13s
+            expect(eventNames(ctx.serverEmits)).toContain("songEnded");
+        })
+
+        // --- 2b. the server restarted: no timer in this process ---
+        // setupPlayingGame starts the song through the SERVICE only, so no timer
+        // exists: exactly the state after a restart (the room came back from Redis,
+        // the setTimeout didn't).
+        it("after a server restart, the first rejoin starts a timer for the REMAINING time", async () => {
+            const { gateway, room, clock, serverEmits } = await setupPlayingGame(); // 10s song
+            clock.advanceSeconds(6);
+            await rejoin(gateway, room.code);
+            await vi.advanceTimersByTimeAsync(3_999);
+            expect(eventNames(serverEmits)).not.toContain("songEnded");
+            await vi.advanceTimersByTimeAsync(1); // 4s left, not a fresh 10s
+            expect(toRoom(serverEmits, room.code).map((e) => e.event)).toEqual(["songEnded", "roomUpdated"]);
+        })
+        it("after a server restart, a song whose time already ran out is revealed right away", async () => {
+            const { gateway, room, clock, serverEmits } = await setupPlayingGame();
+            clock.advanceSeconds(25); // the song should have ended 15s ago
+            const emits = await rejoin(gateway, room.code);
+            // To the whole room: everyone was stuck on this song, not just this player
+            expect(toRoom(serverEmits, room.code).map((e) => e.event)).toEqual(["songEnded", "roomUpdated"]);
+            expect(serverEmits[0].payload).toEqual({ title: "alpha" });
+            expect(eventNames(emits)).not.toContain("playSong"); // nothing left to play
+        })
+        it("the late reveal still gives the no-guess penalty", async () => {
+            const { gateway, room, clock, serverEmits } = await setupPlayingGame();
+            clock.advanceSeconds(25);
+            await rejoin(gateway, room.code);
+            const update = serverEmits.find((e) => e.event === "roomUpdated");
+            expect(update?.payload).toMatchObject({ players: { [HOST]: { score: 11 } } });
         })
     })
 

@@ -52,4 +52,29 @@ describe("SongTimers", () => {
         const timers = new SongTimers();
         expect(() => timers.cancel("nope")).not.toThrow();
     })
+
+    // has(): "is a timer running for this room IN THIS PROCESS?"
+    // After a server restart the answer is false even mid-song: timers live in memory
+    describe("has", () => {
+        it("is false for a room that never had a timer", () => {
+            expect(new SongTimers().has("room1")).toBe(false);
+        })
+        it("is true while the timer is running", () => {
+            const timers = new SongTimers();
+            timers.start("room1", 10_000, vi.fn());
+            expect(timers.has("room1")).toBe(true);
+        })
+        it("is false once the timer has fired", () => {
+            const timers = new SongTimers();
+            timers.start("room1", 10_000, vi.fn());
+            vi.advanceTimersByTime(10_000);
+            expect(timers.has("room1")).toBe(false);
+        })
+        it("is false after cancel", () => {
+            const timers = new SongTimers();
+            timers.start("room1", 10_000, vi.fn());
+            timers.cancel("room1");
+            expect(timers.has("room1")).toBe(false);
+        })
+    })
 });

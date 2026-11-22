@@ -22,10 +22,21 @@ import SongTimerBar from "../components/room/SongTimerBar.tsx";
 import VolumeControl from "../components/VolumeControl.tsx";
 import { describeYoutubeError, type YouTubePlayer } from "../lib/youtube.ts";
 
+// Sent with playSong when we join a song that is already playing:
+// how far into it everyone else was, and when (on OUR clock) we heard that
+type SyncPoint = { offsetSeconds: number; receivedAt: number };
+
+function livePosition(songStart: number, sync: SyncPoint | null): number | null {
+  if (!sync) return null;
+  const secondsSinceMessage = (performance.now() - sync.receivedAt) / 1000;
+  return songStart + sync.offsetSeconds + secondsSinceMessage;
+}
+
 // Browsers block sound until the user has clicked something on the page.
 // After a refresh nobody has, so instead of failing silently we ask for a click.
-function tryToPlay(player: YouTubePlayer, onBlocked: () => void) {
+function tryToPlay(player: YouTubePlayer, position: number | null, onBlocked: () => void) {
   if (navigator.userActivation.hasBeenActive) {
+    if (position !== null) player.seekTo(position, true);
     player.playVideo();
   } else {
     onBlocked();
@@ -48,6 +59,13 @@ export default function RoomPage() {
   // Has the server said "playSong" for the current song? Needed because
   // playSong can arrive BEFORE our player is ready (when rejoining mid-song)
   const shouldPlayRef = useRef(false);
+  // Refs, because the socket handlers below are created once and would
+  // otherwise only ever see the first render's values
+  const songStartRef = useRef(0); // the current song's startTimestamp
+  const syncRef = useRef<SyncPoint | null>(null); // set when we joined mid-song
+  // How many seconds of the song had passed when we joined (0 = from the start).
+  // State, because the timer bar shows it
+  const [joinedAtSeconds, setJoinedAtSeconds] = useState(0);
   // True when the browser blocked sound and we show a "click to hear" button
   const [needsSoundClick, setNeedsSoundClick] = useState(false);
   // Same moment as shouldPlayRef, but as state because the UI shows it
@@ -76,19 +94,29 @@ export default function RoomPage() {
     });
     newSocket.on("loadSong", (song: CurrentSong) => {
       shouldPlayRef.current = false; // new song: wait for playSong again
+      songStartRef.current = song.startTimestamp;
+      syncRef.current = null;
+      setJoinedAtSeconds(0);
       setNeedsSoundClick(false);
       setSongHasStarted(false);
       setGuessResult(null);
       setRevealedTitle(null);
       setCurrentSong(song);
     });
-    newSocket.on("playSong", () => {
+    // No payload: everyone starts together. { offsetSeconds }: we joined a song
+    // that is already playing, so we must jump to where the others are.
+    newSocket.on("playSong", (data?: { offsetSeconds: number }) => {
+      if (data) {
+        syncRef.current = { offsetSeconds: data.offsetSeconds, receivedAt: performance.now() };
+        setJoinedAtSeconds(data.offsetSeconds);
+      }
       shouldPlayRef.current = true;
       setSongHasStarted(true);
       const player = playerRef.current;
       // No player yet? Then handlePlayerChange will start it once it's ready
       if (player) {
-        tryToPlay(player, () => setNeedsSoundClick(true));
+        const position = livePosition(songStartRef.current, syncRef.current);
+        tryToPlay(player, position, () => setNeedsSoundClick(true));
       }
     });
     // Sent only to us, in reply to our own submitGuess
@@ -222,17 +250,24 @@ export default function RoomPage() {
     playerRef.current = player;
     if (player) {
       reportSongLoaded();
-      // The song already started while our player was loading (rejoin mid-song)
+      // The song already started while our player was loading (rejoin mid-song).
+      // The position is computed NOW, so the loading time is caught up too.
       if (shouldPlayRef.current) {
-        tryToPlay(player, () => setNeedsSoundClick(true));
+        const position = livePosition(songStartRef.current, syncRef.current);
+        tryToPlay(player, position, () => setNeedsSoundClick(true));
       }
     }
   }
 
   function handleEnableSound() {
     setNeedsSoundClick(false);
-    // This runs inside a click, so the browser now allows sound
-    playerRef.current?.playVideo();
+    const player = playerRef.current;
+    if (!player) return;
+    // This runs inside a click, so the browser now allows sound. The others kept
+    // playing while the button waited, so jump to where they are now.
+    const position = livePosition(songStartRef.current, syncRef.current);
+    if (position !== null) player.seekTo(position, true);
+    player.playVideo();
   }
 
   function handlePlayerError(errorCode: number) {
@@ -354,6 +389,7 @@ export default function RoomPage() {
               key={currentSong.index}
               phase={revealedTitle !== null ? "ended" : songHasStarted ? "running" : "waiting"}
               durationSeconds={room.songDuration}
+              elapsedSeconds={joinedAtSeconds}
             />
             {revealedTitle !== null ? (
               // Time's up: the answer replaces the guess box
